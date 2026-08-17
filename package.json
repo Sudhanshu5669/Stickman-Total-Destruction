@@ -1,0 +1,20 @@
+{
+  "name": "stickman-ascension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Ragdoll destruction sandbox — a stickman with a gun that fires chickens, cars, planes and elephants.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@dimforge/rapier2d-compat": "^0.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^8.2.1"
+  }
+}
