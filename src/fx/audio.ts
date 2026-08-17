@@ -273,6 +273,18 @@ export class Sfx {
     this.noise({ dur: 0.25, gain: 0.12, freq: 4200, q: 3, type: "bandpass" });
   }
 
+  /** Corrosive rain on stone — a wet sizzle, not a splash. */
+  acidHiss() {
+    if (!this.budget()) return;
+    this.noise({ dur: rand(0.5, 1.1), gain: 0.05, freq: 5200, q: 0.7, type: "highpass", attack: 0.2 });
+  }
+
+  /** Wind for exposed worlds. */
+  wind(strength = 1) {
+    if (!this.budget()) return;
+    this.noise({ dur: 2.4, gain: 0.045 * strength, freq: 380, sweepTo: 180, q: 1.4, type: "bandpass", attack: 0.9 });
+  }
+
   /** Ammo swap / UI blip. */
   ui(up = true) {
     if (!this.budget()) return;

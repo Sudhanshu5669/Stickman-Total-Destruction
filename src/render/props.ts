@@ -341,6 +341,15 @@ export function iconBitmap(id: string): HTMLCanvasElement {
   c = document.createElement("canvas");
   c.width = c.height = ICON_PX;
   const g = c.getContext("2d")!;
+  // Soft light disc behind every glyph. Several props are near-black (stickman, piano,
+  // bowling ball) and would otherwise disappear into the dark HUD slot entirely.
+  const halo = g.createRadialGradient(ICON_PX / 2, ICON_PX / 2, 0, ICON_PX / 2, ICON_PX / 2, ICON_PX * 0.5);
+  halo.addColorStop(0, "rgba(255,255,255,0.26)");
+  halo.addColorStop(0.65, "rgba(255,255,255,0.1)");
+  halo.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = halo;
+  g.fillRect(0, 0, ICON_PX, ICON_PX);
+
   g.translate(ICON_PX / 2, ICON_PX / 2);
   g.scale(1, -1); // icons are authored +Y up, like the world
   g.lineJoin = "round";

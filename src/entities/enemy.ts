@@ -328,10 +328,17 @@ export class Enemy implements Actor {
   }
 
   cullPos() {
-    return this.pos;
+    return this.dormant ? this.restPos : this.pos;
   }
 
   cullRadius = 2.4;
+
+  /**
+   * Natives are adapted to their own weather. Deliberately no damage: acid strong
+   * enough to threaten the player clears every enemy off an open level in under a
+   * minute, so the hazard would solve the level for you.
+   */
+  takeAcid(_amount: number) {}
 
   destroy() {
     this.ragdoll.destroy();

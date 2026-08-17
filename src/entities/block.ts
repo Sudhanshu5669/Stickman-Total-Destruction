@@ -1,10 +1,12 @@
 import { RAPIER, type PhysOwner, FILTER, G, ig, ALL } from "../core/physics";
 import type { Actor, GameCtx } from "../core/types";
-import { clamp, hash01, rand, randSign, v, type V } from "../core/math";
+import { clamp, hash01, rand, randSign, TAU, v, type V } from "../core/math";
 import { at, rgba, roundBox, shade, type Ctx } from "../render/draw";
 import { sfx } from "../fx/audio";
 
-export type MaterialId = "wood" | "brick" | "concrete" | "glass" | "metal" | "ice" | "explosive" | "gold";
+export type MaterialId =
+  | "wood" | "brick" | "concrete" | "glass" | "metal" | "ice" | "explosive" | "gold"
+  | "crystal" | "biomass" | "sandstone" | "hull";
 
 export interface Material {
   id: MaterialId;
@@ -27,6 +29,9 @@ export interface Material {
   points: number;
   explodes?: { radius: number; force: number; damage: number };
 }
+
+/** Corrosive weather can wear a block down to this fraction of its health, no further. */
+const ACID_FLOOR = 0.3;
 
 export const MATERIALS: Record<MaterialId, Material> = {
   wood: {
@@ -61,6 +66,29 @@ export const MATERIALS: Record<MaterialId, Material> = {
   gold: {
     id: "gold", color: "#f2c14e", density: 1500, toughness: 280, friction: 0.8, restitution: 0.05,
     ignore: 2, fragility: 2.6, sound: "metal", debris: "#ffe08a", points: 250,
+  },
+
+  // --- alien world -------------------------------------------------------------
+  /** Brittle and valuable — shatters spectacularly, pays out like it. */
+  crystal: {
+    id: "crystal", color: "#b07ce8", density: 340, toughness: 40, friction: 0.35, restitution: 0.2,
+    ignore: 0.1, fragility: 26, sound: "glass", debris: "#e0b6ff", points: 45,
+  },
+  /** Springy organic matter: soaks up impacts and bounces the debris around. */
+  biomass: {
+    id: "biomass", color: "#5f9e4a", density: 400, toughness: 200, friction: 0.95, restitution: 0.42,
+    ignore: 1.5, fragility: 2.2, sound: "flesh", debris: "#3f7431", points: 20,
+  },
+
+  // --- mars --------------------------------------------------------------------
+  sandstone: {
+    id: "sandstone", color: "#b5643a", density: 620, toughness: 240, friction: 0.9, restitution: 0.04,
+    ignore: 1.4, fragility: 3.0, sound: "stone", debris: "#8a4526", points: 14,
+  },
+  /** Pressurised habitat panelling. Tough, but the whole point is popping it. */
+  hull: {
+    id: "hull", color: "#e6e2d8", density: 700, toughness: 430, friction: 0.7, restitution: 0.1,
+    ignore: 4, fragility: 1.7, sound: "metal", debris: "#b9b3a5", points: 35,
   },
 };
 
@@ -249,6 +277,28 @@ export class Block implements Actor, PhysOwner {
     return Math.max(this.w, this.h);
   }
 
+  /**
+   * Corrosion *weakens* a block but can never destroy it — health is floored at
+   * `ACID_FLOOR` of maximum.
+   *
+   * Letting rain finish blocks off means the level quietly erodes itself while you
+   * play, and a world that dissolves without the player is neither fair nor fun. As a
+   * pre-weakening effect it does something better: anything left in the open is
+   * already cracked and gives way in one hit, while sheltered structures stay solid.
+   *
+   * It also deliberately skips `disturb()` — rain should pit a wall where it stands,
+   * not shake the whole building loose every second.
+   */
+  takeAcid(amount: number) {
+    if (this.dead || this.settle > 0) return;
+    const floor = this.maxHp * ACID_FLOOR;
+    if (this.hp <= floor) return;
+    // Organic matter shrugs acid off; crystal drinks it.
+    const resist = this.mat.id === "biomass" ? 0.3 : this.mat.id === "crystal" ? 1.6 : 1;
+    this.hp = Math.max(floor, this.hp - amount * resist);
+    this.hurtFlash = Math.min(1, this.hurtFlash + 0.18);
+  }
+
   draw(ctx: Ctx) {
     const t = this.body.translation();
     const r = this.body.rotation();
@@ -256,18 +306,37 @@ export class Block implements Actor, PhysOwner {
     const dmgFrac = 1 - clamp(this.hp / this.maxHp, 0, 1);
 
     at(ctx, t.x, t.y, r, () => {
-      const base = m.id === "glass" || m.id === "ice" ? rgba(m.color, 0.55) : m.color;
+      const translucent = m.id === "glass" || m.id === "ice" || m.id === "crystal";
+      const base = translucent ? rgba(m.color, m.id === "crystal" ? 0.68 : 0.55) : m.color;
       roundBox(ctx, this.w, this.h, Math.min(0.06, this.w * 0.2), base, shade(m.color, -0.4), 0.045);
 
       // Top highlight gives the flat blocks a readable light direction.
-      ctx.fillStyle = rgba("#ffffff", m.id === "glass" ? 0.22 : 0.13);
+      ctx.fillStyle = rgba("#ffffff", translucent ? 0.22 : 0.13);
       ctx.fillRect(-this.w / 2 + 0.03, this.h / 2 - Math.min(0.09, this.h * 0.22), this.w - 0.06, Math.min(0.07, this.h * 0.18));
 
-      if (m.id === "brick") this.drawBrickCourses(ctx);
-      if (m.id === "explosive") this.drawHazardStripes(ctx);
-      if (m.id === "gold") {
-        ctx.fillStyle = rgba("#ffffff", 0.5);
-        ctx.fillRect(-this.w * 0.3, -this.h * 0.1, this.w * 0.16, this.h * 0.5);
+      switch (m.id) {
+        case "brick":
+        case "sandstone":
+          this.drawBrickCourses(ctx);
+          break;
+        case "explosive":
+          this.drawHazardStripes(ctx);
+          break;
+        case "gold":
+          ctx.fillStyle = rgba("#ffffff", 0.5);
+          ctx.fillRect(-this.w * 0.3, -this.h * 0.1, this.w * 0.16, this.h * 0.5);
+          break;
+        case "crystal":
+          this.drawFacets(ctx);
+          break;
+        case "biomass":
+          this.drawPods(ctx);
+          break;
+        case "hull":
+          this.drawPanelSeams(ctx);
+          break;
+        default:
+          break;
       }
 
       if (dmgFrac > 0.18) this.drawCracks(ctx, dmgFrac);
@@ -294,6 +363,58 @@ export class Block implements Actor, PhysOwner {
       ctx.moveTo(-this.w / 4 + off, y);
       ctx.lineTo(-this.w / 4 + off, y + this.h / rows);
       ctx.stroke();
+    }
+  }
+
+  /** Bright internal fracture lines that make crystal read as grown, not cut. */
+  private drawFacets(ctx: Ctx) {
+    ctx.strokeStyle = rgba("#ffffff", 0.4);
+    ctx.lineWidth = 0.03;
+    const n = 3;
+    for (let i = 0; i < n; i++) {
+      const t = (i + 1) / (n + 1);
+      ctx.beginPath();
+      ctx.moveTo(-this.w / 2, -this.h / 2 + this.h * t);
+      ctx.lineTo(-this.w / 2 + this.w * t, this.h / 2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = rgba("#ffffff", 0.28);
+    ctx.fillRect(-this.w * 0.34, -this.h * 0.3, this.w * 0.1, this.h * 0.6);
+  }
+
+  /** Clustered blisters — the organic material of the alien world. */
+  private drawPods(ctx: Ctx) {
+    ctx.fillStyle = rgba("#000000", 0.16);
+    const n = Math.max(2, Math.round(this.w * this.h * 8));
+    for (let i = 0; i < n; i++) {
+      const hx = hash01(this.seed + i * 4.1) - 0.5;
+      const hy = hash01(this.seed + i * 8.3) - 0.5;
+      const r = (0.1 + hash01(this.seed + i * 2.2) * 0.14) * Math.min(this.w, this.h);
+      ctx.beginPath();
+      ctx.arc(hx * this.w * 0.8, hy * this.h * 0.8, r, 0, TAU);
+      ctx.fill();
+    }
+    ctx.strokeStyle = rgba("#9ee06a", 0.5);
+    ctx.lineWidth = 0.03;
+    ctx.beginPath();
+    ctx.moveTo(-this.w / 2, 0);
+    ctx.lineTo(this.w / 2, this.h * 0.12);
+    ctx.stroke();
+  }
+
+  /** Riveted panel seams for Martian habitat plating. */
+  private drawPanelSeams(ctx: Ctx) {
+    ctx.strokeStyle = rgba("#000000", 0.2);
+    ctx.lineWidth = 0.03;
+    ctx.strokeRect(-this.w / 2 + 0.07, -this.h / 2 + 0.07, this.w - 0.14, this.h - 0.14);
+    ctx.fillStyle = rgba("#000000", 0.28);
+    const r = 0.028;
+    for (const sx of [-1, 1]) {
+      for (const sy of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(sx * (this.w / 2 - 0.13), sy * (this.h / 2 - 0.13), r, 0, TAU);
+        ctx.fill();
+      }
     }
   }
 
@@ -384,6 +505,8 @@ export class Terrain implements Actor, PhysOwner {
     ctx.strokeStyle = rgba("#000000", 0.3);
     ctx.lineWidth = 0.05;
     ctx.strokeRect(x, y, this.w, this.h);
+
+    if (!this.game.theme.vegetation) return;
 
     // Sparse grass tufts, seeded off world position so they never shimmer.
     // Ground slabs are hundreds of metres wide, so only tuft the visible span.

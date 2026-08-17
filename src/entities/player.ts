@@ -63,9 +63,35 @@ const TUNE = {
   regenRate: 9,
 };
 
+/**
+ * Everything the character can be told to do, independent of where it came from.
+ * The human path fills this from `Input`; attract mode fills it from an AI. Edge
+ * fields (`jumpPressed`, `firePressed`, `selectAmmo`, `cycleAmmo`) are consumed and
+ * cleared by the player once read, exactly like real input edges.
+ */
+export interface PlayerControl {
+  moveX: number;
+  jumpPressed: boolean;
+  crouch: boolean;
+  /** World-space point to aim at. */
+  aimWorld: V;
+  fireHeld: boolean;
+  firePressed: boolean;
+  selectAmmo: number | null;
+  cycleAmmo: number;
+}
+
+export const blankControl = (): PlayerControl => ({
+  moveX: 0, jumpPressed: false, crouch: false, aimWorld: v(1, 0),
+  fireHeld: false, firePressed: false, selectAmmo: null, cycleAmmo: 0,
+});
+
 export class Player implements Actor {
   dead = false;
   z = 22;
+
+  /** When set, drives the character instead of the keyboard and mouse. */
+  control: PlayerControl | null = null;
 
   ragdoll!: Ragdoll;
   readonly weapon = new Weapon();
@@ -161,12 +187,69 @@ export class Player implements Actor {
     return this.ragdoll.center();
   }
 
+  takeAcid(amount: number) {
+    if (this.ragdoll.dead) return;
+    const c = this.ragdoll.center();
+    this.ragdoll.takeDamage(amount, c);
+    this.game.particles.emit("spark", c.x, c.y + 0.8, {
+      vx: 0, vy: -3, maxLife: 0.4, size: 0.14, color: "#9dff6a", drag: 1,
+    });
+  }
+
   get isLimp() {
     return this.ragdoll.limp;
   }
 
   private get controllable() {
     return !this.ragdoll.dead && !this.ragdoll.limp;
+  }
+
+  // ---------------------------------------------------- control source (human or AI)
+
+  private get wantMoveX() {
+    return this.control ? clamp(this.control.moveX, -1, 1) : this.input.moveX;
+  }
+
+  private get wantCrouch() {
+    return this.control ? this.control.crouch : this.input.held("KeyS", "ArrowDown");
+  }
+
+  /** Edge-consuming: returns true once per request. */
+  private takeJump() {
+    if (!this.control) return this.input.pressed("Space", "KeyW", "ArrowUp");
+    const j = this.control.jumpPressed;
+    this.control.jumpPressed = false;
+    return j;
+  }
+
+  private get wantFireHeld() {
+    return this.control ? this.control.fireHeld : this.input.mouseDown;
+  }
+
+  private takeFirePressed() {
+    if (!this.control) return this.input.mousePressed;
+    const f = this.control.firePressed;
+    this.control.firePressed = false;
+    return f;
+  }
+
+  private takeAmmoSelect(): number | null {
+    if (!this.control) {
+      const d = this.input.digitPressed();
+      return d > 0 ? d - 1 : null;
+    }
+    const s = this.control.selectAmmo;
+    this.control.selectAmmo = null;
+    return s;
+  }
+
+  private takeAmmoCycle(): number {
+    if (!this.control) {
+      return this.input.wheel + (this.input.pressed("KeyE") ? 1 : 0) - (this.input.pressed("KeyQ") ? 1 : 0);
+    }
+    const c = this.control.cycleAmmo;
+    this.control.cycleAmmo = 0;
+    return c;
   }
 
   // ------------------------------------------------------------------ damage
@@ -295,7 +378,9 @@ export class Player implements Actor {
   }
 
   private updateAim() {
-    const world = this.game.camera.screenToWorld(this.input.mouse.x, this.input.mouse.y);
+    const world = this.control
+      ? this.control.aimWorld
+      : this.game.camera.screenToWorld(this.input.mouse.x, this.input.mouse.y);
     this.aim = world;
     const from = this.chest;
     const d = norm(v(world.x - from.x, world.y - from.y));
@@ -305,23 +390,23 @@ export class Player implements Actor {
 
   private handleWeapon(dt: number) {
     const w = this.weapon;
-    const held = this.input.mouseDown;
+    const held = this.wantFireHeld;
     w.update(dt, held);
 
     // Swapping ammo is a UI action, not a physical one — it stays available while
     // knocked down. Being unable to change weapon for a second after every heavy
     // shot reads as the game ignoring you.
-    if (this.input.wheel) w.cycle(this.input.wheel);
-    const digit = this.input.digitPressed();
-    if (digit > 0) w.select(digit - 1);
-    if (this.input.pressed("KeyQ")) w.cycle(-1);
-    if (this.input.pressed("KeyE")) w.cycle(1);
+    const cycle = this.takeAmmoCycle();
+    if (cycle) w.cycle(cycle);
+    const select = this.takeAmmoSelect();
+    if (select !== null) w.select(select);
 
+    const pressed = this.takeFirePressed();
     if (!this.controllable) return;
 
     const hand = this.hand;
     const dir = v(Math.cos(this.aimAngle), Math.sin(this.aimAngle));
-    const res = w.fire(this.game, hand, dir, this.facing, held, this.input.mousePressed);
+    const res = w.fire(this.game, hand, dir, this.facing, held, pressed);
     if (res.fired) {
       const t = TUNE.recoilTransfer;
       this.ragdoll.applyImpulse(v(res.recoil.x * t, res.recoil.y * t));
@@ -353,7 +438,7 @@ export class Player implements Actor {
   private balance(dt: number) {
     const pelvis = this.ragdoll.bone("pelvis").body;
     const total = this.ragdoll.totalMass();
-    const wantHeight = this.input.held("KeyS", "ArrowDown") ? TUNE.crouchHeight : TUNE.rideHeight;
+    const wantHeight = this.wantCrouch ? TUNE.crouchHeight : TUNE.rideHeight;
 
     if (this.grounded && this.groundDist < wantHeight + TUNE.groundSlack) {
       const vel = pelvis.linvel();
@@ -402,7 +487,7 @@ export class Player implements Actor {
   }
 
   private locomotion(dt: number) {
-    const move = this.input.moveX;
+    const move = this.wantMoveX;
     const pelvis = this.ragdoll.bone("pelvis").body;
     const torso = this.ragdoll.bone("torso").body;
 
@@ -438,7 +523,7 @@ export class Player implements Actor {
   private jump(dt: number) {
     this.coyoteLeft = Math.max(0, this.coyoteLeft - dt);
     this.jumpBuffered = Math.max(0, this.jumpBuffered - dt);
-    if (this.input.pressed("Space", "KeyW", "ArrowUp")) this.jumpBuffered = TUNE.jumpBuffer;
+    if (this.takeJump()) this.jumpBuffered = TUNE.jumpBuffer;
 
     if (this.jumpBuffered > 0 && this.coyoteLeft > 0) {
       this.jumpBuffered = 0;
@@ -467,15 +552,15 @@ export class Player implements Actor {
     r.setMotor("armBackLo", -0.55, TUNE.armStiff * 0.6, TUNE.armDamp);
 
     // --- spine + head ------------------------------------------------------
-    const lean = clamp(this.input.moveX * 0.16 + (this.grounded ? 0 : 0.08), -0.3, 0.3);
+    const lean = clamp(this.wantMoveX * 0.16 + (this.grounded ? 0 : 0.08), -0.3, 0.3);
     r.setMotor("torso", -lean, TUNE.spineStiff, TUNE.spineDamp);
     // Head tracks the aim a little; looks alert without breaking the neck limits.
     r.setMotor("head", clamp(wrapPi(armWorld - torsoRot) * 0.12, -0.5, 0.5), TUNE.neckStiff, TUNE.neckDamp);
 
     // --- legs --------------------------------------------------------------
-    const crouching = this.input.held("KeyS", "ArrowDown");
+    const crouching = this.wantCrouch;
     const vx = r.bone("pelvis").body.linvel().x;
-    const moving = this.grounded && this.input.moveX !== 0;
+    const moving = this.grounded && this.wantMoveX !== 0;
 
     let hipF: number, hipB: number, kneeF: number, kneeB: number, footPose: number;
     if (!this.grounded) {

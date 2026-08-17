@@ -27,6 +27,7 @@ export interface HudState {
   paused: boolean;
   /** 0..1, fades the intro control card out once the player starts playing. */
   hintAlpha: number;
+  levelName: string;
 }
 
 const INK = "#0e1017";
@@ -58,8 +59,8 @@ export class Hud {
     this.drawAmmoBar(ctx, w, h, scale, s, dt);
     this.drawCombo(ctx, w, h, scale, s);
     if (s.hintAlpha > 0.01) this.drawHints(ctx, w, h, scale, s);
-    if (s.down) this.drawDownBanner(ctx, w, h, scale, s);
-    if (s.paused) this.drawPaused(ctx, w, h, scale);
+    if (s.down && !s.paused) this.drawDownBanner(ctx, w, h, scale, s);
+    // The pause overlay belongs to Menu — it owns the clickable buttons.
     if (s.showDebug) this.drawDebug(ctx, w, h, scale, s);
   }
 
@@ -108,6 +109,7 @@ export class Hud {
     text(ctx, `${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, x - 10 * k, y + 20 * k, 24 * k, CREAM, "right", "alphabetic", 900, "rgba(0,0,0,0.6)");
     text(ctx, "STICKMEN DOWN", x - 10 * k, y + 36 * k, 11 * k, "rgba(244,241,232,0.55)", "right", "alphabetic", 800);
     text(ctx, `${s.blocksDestroyed} BLOCKS SMASHED`, x - 10 * k, y + 52 * k, 11 * k, "rgba(255,210,63,0.8)", "right", "alphabetic", 800);
+    text(ctx, s.levelName.toUpperCase(), x - 10 * k, y + 70 * k, 10 * k, "rgba(244,241,232,0.35)", "right", "alphabetic", 800);
   }
 
   /** Bottom strip: every round, current one lifted and lit. */
@@ -200,8 +202,8 @@ export class Hud {
       ["CLICK", "fire"],
       ["1-9 / Q E / WHEEL", "swap ammo"],
       ["R", "go limp"],
-      ["F", "reset level"],
-      ["M", "mute"],
+      ["F", "restart"],
+      ["ESC", "pause / menu"],
     ];
     const bw = 250 * k;
     const bh = (lines.length * 22 + 44) * k;
@@ -222,13 +224,6 @@ export class Hud {
     ctx.fillRect(0, 0, w, h);
     text(ctx, "OOF", w / 2, h / 2 - 10 * k, 72 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.7)");
     text(ctx, `getting back up in ${Math.max(0, s.respawnIn).toFixed(1)}s`, w / 2, h / 2 + 44 * k, 16 * k, "rgba(244,241,232,0.7)", "center", "middle", 700);
-  }
-
-  private drawPaused(ctx: Ctx, w: number, h: number, k: number) {
-    ctx.fillStyle = "rgba(10,12,18,0.6)";
-    ctx.fillRect(0, 0, w, h);
-    text(ctx, "PAUSED", w / 2, h / 2, 56 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.7)");
-    text(ctx, "press P to resume", w / 2, h / 2 + 40 * k, 15 * k, "rgba(244,241,232,0.65)", "center", "middle", 700);
   }
 
   private drawDebug(ctx: Ctx, w: number, h: number, k: number, s: HudState) {

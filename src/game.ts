@@ -5,26 +5,30 @@ import type { Actor, GameCtx } from "./core/types";
 import { Particles } from "./fx/particles";
 import { sfx } from "./fx/audio";
 import { Background } from "./render/background";
+import { THEMES, type Theme } from "./render/theme";
 import { rgba, type Ctx } from "./render/draw";
 import { Player } from "./entities/player";
-import { alertNearby } from "./entities/enemy";
+import { Enemy, alertNearby } from "./entities/enemy";
+import { Block, Debris } from "./entities/block";
 import { Hud, type HudState } from "./ui/hud";
-import { buildSandbox, type LevelInfo } from "./levels/sandbox";
+import { Menu } from "./ui/menu";
+import { DemoDriver } from "./ai/demo";
+import { Builder } from "./levels/builder";
+import { LEVELS, levelById } from "./levels";
+import type { LevelDef, LevelInfo } from "./levels/types";
 import { clamp, damp, lerp, rand, v, type V } from "./core/math";
 import { CreatureProjectile, RigidProjectile } from "./entities/projectile";
-import { Debris } from "./entities/block";
 
 const STEP = 1 / 60;
 const MAX_STEPS = 5;
 /** Pixels per metre at rest; the camera pulls out from here as the action speeds up. */
 const BASE_ZOOM = 40;
+/** Earth-normal gravity, the baseline other worlds are expressed against. */
+const BASE_GRAVITY = -26;
+/** Attract mode reloads on this cadence so the demo never runs out of things to break. */
+const DEMO_RELOAD = 52;
 
-/** Soft limits — oldest entries are retired once exceeded, so perf degrades gracefully. */
-const CAPS = {
-  rigidProjectiles: 90,
-  creatures: 42,
-  debris: 200,
-};
+export type Mode = "menu" | "playing";
 
 export class Game implements GameCtx {
   readonly canvas: HTMLCanvasElement;
@@ -33,15 +37,24 @@ export class Game implements GameCtx {
   readonly camera = new Camera();
   readonly particles = new Particles();
   readonly hud = new Hud();
+  readonly menu = new Menu();
   readonly background = new Background();
 
   physics!: Physics;
   player!: Player;
   level!: LevelInfo;
+  levelDef: LevelDef = LEVELS[0];
+  theme: Theme = THEMES.day;
+
+  mode: Mode = "menu";
+  private demo: DemoDriver | null = null;
+  private demoAge = 0;
 
   private actors: Actor[] = [];
   private pending: Actor[] = [];
   private drawList: Actor[] = [];
+  /** Rebuilt during reaping; index 0 is always the player. See `damageables()`. */
+  private damageList: Actor[] = [];
 
   time = 0;
   private accumulator = 0;
@@ -80,24 +93,40 @@ export class Game implements GameCtx {
 
   async init() {
     await Physics.load();
-    this.loadLevel();
+    this.enterMenu();
     this.running = true;
     this.lastFrame = performance.now();
     requestAnimationFrame(this.frame);
   }
 
-  private loadLevel() {
+  /**
+   * Builds a world. The level definition owns gravity, palette and any hazard, so
+   * switching worlds rebuilds the physics world rather than mutating the live one.
+   */
+  private loadLevel(def: LevelDef) {
     for (const a of this.actors) a.destroy();
     this.actors.length = 0;
     this.pending.length = 0;
+    this.damageList.length = 0;
     this.particles.clear();
 
-    this.physics = new Physics(-26);
-    this.level = buildSandbox(this);
+    this.levelDef = def;
+    this.theme = THEMES[def.theme] ?? THEMES.day;
+    this.physics = new Physics(def.gravity);
+    // Falling debris should float on a low-gravity world too.
+    this.particles.gravityScale = def.gravity / BASE_GRAVITY;
+
+    const builder = new Builder(this, this.theme);
+    this.level = def.build(this, builder);
     this.flushPending();
 
     this.player = this.add(new Player(this, this.input, this.level.spawn.x, this.level.spawn.y));
     this.flushPending();
+
+    if (def.hazard) {
+      this.add(def.hazard(this));
+      this.flushPending();
+    }
 
     this.camera.pos = v(this.level.spawn.x, this.level.spawn.y + 2);
     this.camera.targetZoom = BASE_ZOOM;
@@ -110,11 +139,45 @@ export class Game implements GameCtx {
     this.comboMax = 0;
     this.blocksDestroyed = 0;
     this.time = 0;
+    this.hitstopLeft = 0;
+    this.slowmoLeft = 0;
+    this.slowmoScale = 1;
+    this.accumulator = 0;
+  }
+
+  /** Starts a level for the player. */
+  startLevel(def: LevelDef) {
+    this.mode = "playing";
+    this.demo = null;
+    this.paused = false;
+    this.hintAlpha = 1;
+    this.loadLevel(def);
+    this.player.control = null;
+    this.canvas.style.cursor = "none";
+    sfx.levelUp();
+  }
+
+  /** Returns to the start menu, where the selected world plays itself. */
+  enterMenu() {
+    this.mode = "menu";
+    this.paused = false;
+    this.loadLevel(this.menu.level);
+    this.demo = new DemoDriver(this);
+    this.demo.reset(this.level.spawn);
+    this.player.control = this.demo.control;
+    // The demo is a showcase, not a fair fight — it shouldn't die mid-attract.
+    this.player.ragdoll.invulnerable = true;
+    this.demoAge = 0;
+    this.canvas.style.cursor = "default";
+  }
+
+  restart() {
+    this.startLevel(this.levelDef);
   }
 
   reset() {
-    this.loadLevel();
-    sfx.levelUp();
+    if (this.mode === "menu") this.enterMenu();
+    else this.restart();
   }
 
   // ------------------------------------------------------------ GameCtx impl
@@ -161,6 +224,10 @@ export class Game implements GameCtx {
     this.add(new Debris(this, x, y, size, size * rand(0.6, 1.1), color, vel, rand(5, 9)));
   }
 
+  damageables(): readonly Actor[] {
+    return this.damageList;
+  }
+
   reportDestruction(kind: "block" | "enemy" | "structure", at: V) {
     if (kind === "block") this.blocksDestroyed++;
     this.combo++;
@@ -187,21 +254,26 @@ export class Game implements GameCtx {
     this.fps = lerp(this.fps, rawDt > 0 ? 1 / rawDt : 60, 0.1);
 
     this.resize();
+    this.handleFrameKeys();
 
-    // Pause is the one control handled at frame rate: while paused the simulation
-    // never runs, so a key consumed only by the sim could never un-pause it.
-    if (this.input.pressed("KeyP", "Escape")) {
-      this.paused = !this.paused;
-      sfx.ui(!this.paused);
-      this.input.consumeEdges();
-    }
-
-    if (this.paused) {
-      // Nothing will consume them, so don't let edges pile up until we resume.
-      this.input.consumeEdges();
+    if (this.mode === "menu") {
+      this.menu.lastMouse.x = this.input.mouse.x;
+      this.menu.lastMouse.y = this.input.mouse.y;
+      this.menu.update(rawDt);
+      this.handleMenuInput();
+      this.simulate(rawDt);
+    } else if (this.paused) {
+      this.menu.lastMouse.x = this.input.mouse.x;
+      this.menu.lastMouse.y = this.input.mouse.y;
+      this.handlePauseInput();
     } else {
       this.simulate(rawDt);
     }
+
+    // Anything the sim didn't consume (paused, or a frame with no fixed step in menu
+    // mode) is dropped here so edges can't pile up across states.
+    if (this.mode !== "playing" || this.paused) this.input.consumeEdges();
+
     this.render(rawDt);
   };
 
@@ -230,7 +302,7 @@ export class Game implements GameCtx {
       // Edges belong to the step that saw them. If no step runs this frame — a
       // 120Hz display, hitstop, slow-motion — they stay latched for the next one
       // instead of being thrown away unread.
-      this.input.consumeEdges();
+      if (this.mode === "playing") this.input.consumeEdges();
       this.accumulator -= STEP;
       steps++;
     }
@@ -242,7 +314,9 @@ export class Game implements GameCtx {
 
     this.displayScore = Math.round(damp(this.displayScore, this.score, 9, rawDt));
     this.flashStrength = Math.max(0, this.flashStrength - rawDt * 3.4);
-    if (this.input.engaged) this.hintAlpha = Math.max(0, this.hintAlpha - rawDt * 0.7);
+    if (this.mode === "playing" && this.input.engaged) {
+      this.hintAlpha = Math.max(0, this.hintAlpha - rawDt * 0.7);
+    }
 
     if (this.comboTimer > 0) {
       this.comboTimer -= rawDt * 0.62;
@@ -252,12 +326,19 @@ export class Game implements GameCtx {
       }
     }
 
+    if (this.demo) {
+      this.demoAge += rawDt;
+      this.demo.update(rawDt, this.player, this.level.bounds);
+      // Rebuild once the demo has flattened enough of the level to get boring.
+      if (this.demoAge > DEMO_RELOAD) this.enterMenu();
+    }
+
     this.updateCamera(rawDt);
   }
 
   private fixedUpdate(dt: number) {
     this.time += dt;
-    this.handleSimKeys();
+    if (this.mode === "playing") this.handleSimKeys();
     this.flushPending();
 
     this.physics.step(dt);
@@ -311,12 +392,14 @@ export class Game implements GameCtx {
     }
   }
 
-  /** Removes dead actors and enforces the population caps. */
+  /** Removes dead actors, enforces population caps and rebuilds the damageable list. */
   private reapAndCap() {
     let rigid = 0;
     let creatures = 0;
     let debris = 0;
     const write: Actor[] = [];
+    // Contract: the player is index 0 so hazards can always reach it.
+    const damage: Actor[] = [this.player];
 
     // Walk newest-first so the oldest of each type are the ones over the cap.
     for (let i = this.actors.length - 1; i >= 0; i--) {
@@ -340,11 +423,14 @@ export class Game implements GameCtx {
           a.destroy();
           continue;
         }
+      } else if (a instanceof Block || a instanceof Enemy) {
+        damage.push(a);
       }
       write.push(a);
     }
     write.reverse();
     this.actors = write;
+    this.damageList = damage;
   }
 
   private updateCamera(dt: number) {
@@ -360,13 +446,79 @@ export class Game implements GameCtx {
 
   // ------------------------------------------------------------------ input
 
+  /** Frame-rate controls: pause, and menu navigation keys. */
+  private handleFrameKeys() {
+    if (this.mode === "playing" && this.input.pressed("KeyP", "Escape")) {
+      this.paused = !this.paused;
+      this.canvas.style.cursor = this.paused ? "default" : "none";
+      sfx.ui(!this.paused);
+      this.input.consumeEdges();
+    }
+  }
+
+  private handleMenuInput() {
+    const m = this.menu;
+    if (this.input.pressed("ArrowRight", "KeyD")) {
+      m.moveSelection(1);
+      sfx.ui(true);
+      this.enterMenu();
+    } else if (this.input.pressed("ArrowLeft", "KeyA")) {
+      m.moveSelection(-1);
+      sfx.ui(false);
+      this.enterMenu();
+    } else if (this.input.pressed("Enter", "NumpadEnter", "Space")) {
+      this.startLevel(m.level);
+      return;
+    } else if (this.input.pressed("KeyM")) {
+      sfx.toggleMute();
+    }
+
+    if (this.input.mousePressed) {
+      const a = m.click(this.input.mouse.x, this.input.mouse.y);
+      if (a.kind === "play") {
+        this.startLevel(a.level);
+      } else if (a.kind === "select") {
+        sfx.ui(true);
+        // Preview the world you just picked, immediately.
+        this.enterMenu();
+      } else if (a.kind === "mute") {
+        sfx.toggleMute();
+      }
+    } else {
+      m.hover(this.input.mouse.x, this.input.mouse.y);
+    }
+  }
+
+  private handlePauseInput() {
+    if (!this.input.mousePressed) {
+      this.menu.hover(this.input.mouse.x, this.input.mouse.y);
+      return;
+    }
+    const a = this.menu.click(this.input.mouse.x, this.input.mouse.y);
+    switch (a.kind) {
+      case "resume":
+        this.paused = false;
+        this.canvas.style.cursor = "none";
+        sfx.ui(true);
+        break;
+      case "restart":
+        this.restart();
+        break;
+      case "quit":
+        this.enterMenu();
+        break;
+      default:
+        break;
+    }
+  }
+
   /** Runs inside the fixed step, so these edges are consumed exactly once. */
   private handleSimKeys() {
     if (this.input.pressed("KeyM")) sfx.toggleMute();
     if (this.input.pressed("F3", "Backquote")) this.showDebug = !this.showDebug;
     if (this.input.pressed("KeyR")) this.player.toggleRagdoll();
     // Reset last: it replaces `this.player`, so nothing after it may touch the old one.
-    if (this.input.pressed("KeyF")) this.reset();
+    if (this.input.pressed("KeyF")) this.restart();
   }
 
   // ------------------------------------------------------------------ render
@@ -390,7 +542,7 @@ export class Game implements GameCtx {
     const h = this.canvas.clientHeight;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.background.draw(ctx, this.camera, w, h);
+    this.background.draw(ctx, this.camera, w, h, this.theme);
 
     ctx.save();
     this.camera.apply(ctx, w, h);
@@ -408,18 +560,27 @@ export class Game implements GameCtx {
 
     for (const a of this.drawList) a.draw(ctx);
     this.particles.draw(ctx);
-    this.player.drawTrajectory(ctx);
+    if (this.mode === "playing") this.player.drawTrajectory(ctx);
     ctx.restore();
 
-    this.background.drawHaze(ctx, w, h);
+    this.background.drawHaze(ctx, w, h, this.theme);
 
     if (this.flashStrength > 0.01) {
       ctx.fillStyle = rgba(this.flashColor, clamp(this.flashStrength, 0, 1) * 0.75);
       ctx.fillRect(0, 0, w, h);
     }
 
-    const state = this.hudState();
-    this.hud.draw(ctx, w, h, state, dt);
+    if (this.mode === "menu") {
+      this.menu.draw(ctx, w, h, sfx.muted);
+      return;
+    }
+
+    this.hud.draw(ctx, w, h, this.hudState(), dt);
+
+    if (this.paused) {
+      this.menu.drawPause(ctx, w, h, this.levelDef.name);
+      return;
+    }
 
     this.hud.drawCrosshair(
       ctx,
@@ -458,6 +619,16 @@ export class Game implements GameCtx {
       muted: sfx.muted,
       paused: this.paused,
       hintAlpha: this.hintAlpha,
+      levelName: this.levelDef.name,
     };
   }
 }
+
+/** Soft limits — oldest entries are retired once exceeded, so perf degrades gracefully. */
+const CAPS = {
+  rigidProjectiles: 90,
+  creatures: 42,
+  debris: 200,
+};
+
+export { levelById };

@@ -2,23 +2,31 @@ import { Block, Terrain, type MaterialId } from "../entities/block";
 import { Enemy, type EnemyKind } from "../entities/enemy";
 import type { GameCtx } from "../core/types";
 import { chance, pick, rand } from "../core/math";
+import type { Theme } from "../render/theme";
+import { Decor } from "./hazards";
 
 /**
  * Structures are plain stacks of dynamic blocks — no pre-scored break points, no
  * scripted collapse. Everything you see fall down was solved, not animated.
+ *
+ * Terrain colours default to the level's theme, so a world's palette is declared once.
  */
 export class Builder {
   readonly enemies: Enemy[] = [];
 
-  constructor(private readonly game: GameCtx) {}
+  constructor(private readonly game: GameCtx, private readonly theme: Theme) {}
 
-  ground(x: number, y: number, w: number, h = 6, color = "#3a4b3a", top = "#5c8a43") {
+  ground(x: number, y: number, w: number, h = 6, color = this.theme.ground, top = this.theme.groundTop) {
     return this.game.add(new Terrain(this.game, x, y, w, h, color, top));
   }
 
   /** Solid rock ledge — reads as terrain rather than something you can knock over. */
   ledge(x: number, y: number, w: number, h = 1.2) {
-    return this.game.add(new Terrain(this.game, x, y, w, h, "#4a4740", "#6b6353"));
+    return this.game.add(new Terrain(this.game, x, y, w, h, this.theme.rock, this.theme.rockTop));
+  }
+
+  decor(x: number, y: number, kind: "torch" | "banner" | "antenna" | "pod", tint?: string, z?: number) {
+    return this.game.add(new Decor(this.game, x, y, kind, tint, z));
   }
 
   block(x: number, y: number, w: number, h: number, material: MaterialId, angle = 0, anchored = true) {
@@ -183,6 +191,157 @@ export class Builder {
     this.block(x1 + 0.2, y + 0.7, 0.16, 1.1, material);
     this.block(x2 - 0.2, y + 0.7, 0.16, 1.1, material);
     return y + 0.18;
+  }
+
+  // ------------------------------------------------------------------ castle
+
+  /**
+   * Curtain wall with a walkway and crenellations.
+   *
+   * Merlon gaps are sized to fit a stickman, and `guards` are dropped **into** those
+   * gaps rather than on top of the stone — anything perched on a merlon slides off and
+   * is dead before the player arrives. Returns the walkway height.
+   */
+  battlement(
+    x: number, baseY: number, w: number, h: number,
+    material: MaterialId = "concrete", guards: EnemyKind[] = [],
+  ) {
+    this.wall(x, baseY, w, h, material, 0.62);
+
+    const deck = baseY + h;
+    this.block(x, deck + 0.2, w, 0.4, material);
+    const top = deck + 0.4;
+
+    const merlonW = 0.55;
+    const gap = 1.7; // wide enough to stand in
+    const pitch = merlonW + gap;
+    const count = Math.max(2, Math.floor(w / pitch));
+    const start = x - (count * pitch - gap) / 2 + merlonW / 2;
+
+    const crenels: number[] = [];
+    for (let i = 0; i < count; i++) {
+      this.block(start + i * pitch, top + 0.4, merlonW, 0.8, material);
+      if (i < count - 1) crenels.push(start + i * pitch + pitch / 2);
+    }
+
+    guards.forEach((k, i) => {
+      const cx = crenels.length ? crenels[Math.floor((i * crenels.length) / Math.max(1, guards.length))] : x;
+      this.enemy(k, cx, top + 0.02, cx > x ? -1 : 1);
+    });
+    return top;
+  }
+
+  /** Square keep tower: shaft, crenellated crown and an optional pitched roof. */
+  castleTower(opts: {
+    x: number; baseY: number; w: number; height: number;
+    material?: MaterialId; roof?: boolean; guards?: EnemyKind[];
+  }) {
+    const mat = opts.material ?? "concrete";
+    const courses = Math.max(2, Math.round(opts.height / 0.85));
+    const ch = opts.height / courses;
+    for (let i = 0; i < courses; i++) {
+      const y = opts.baseY + ch / 2 + i * ch;
+      this.block(opts.x - opts.w / 2 + 0.3, y, 0.6, ch * 0.96, mat);
+      this.block(opts.x + opts.w / 2 - 0.3, y, 0.6, ch * 0.96, mat);
+      // Arrow slit every third course, otherwise fill the middle in.
+      if (i % 3 === 1) this.block(opts.x, y, opts.w - 1.2, ch * 0.3, mat);
+      else this.block(opts.x, y, opts.w - 1.2, ch * 0.96, mat);
+    }
+    const top = opts.baseY + opts.height;
+    const capW = opts.w + 0.5;
+    this.block(opts.x, top + 0.2, capW, 0.4, mat);
+    const deck = top + 0.4;
+
+    // Corner merlons only. Ringing the whole cap leaves nowhere for a guard to stand.
+    const merlonW = 0.5;
+    for (const s of [-1, 1]) {
+      this.block(opts.x + s * (capW / 2 - merlonW / 2), deck + 0.4, merlonW, 0.8, mat);
+    }
+
+    if (opts.roof) {
+      const rise = opts.w * 0.75;
+      const half = opts.w / 2 + 0.3;
+      const len = Math.hypot(half, rise);
+      const ang = Math.atan2(rise, half);
+      // Rests just clear of the merlons (which top out at deck + 0.8).
+      const roofY = deck + 0.95;
+      this.block(opts.x - half / 2, roofY + rise / 2, len, 0.3, "wood", ang);
+      this.block(opts.x + half / 2, roofY + rise / 2, len, 0.3, "wood", -ang);
+    }
+
+    opts.guards?.forEach((k, i) => {
+      const span = capW - merlonW * 2.4;
+      const n = opts.guards!.length;
+      const gx = opts.x + (n === 1 ? 0 : (i / (n - 1) - 0.5) * span);
+      this.enemy(k, gx, deck + 0.02, gx > opts.x ? -1 : 1);
+    });
+    return deck;
+  }
+
+  /** Gatehouse: two piers with a stepped arch between them. */
+  gate(x: number, baseY: number, width: number, height: number, material: MaterialId = "concrete") {
+    const pier = 0.9;
+    this.block(x - width / 2 - pier / 2, baseY + height / 2, pier, height, material);
+    this.block(x + width / 2 + pier / 2, baseY + height / 2, pier, height, material);
+    const steps = 4;
+    for (let i = 0; i < steps; i++) {
+      const t = (i + 1) / (steps + 1);
+      const span = width * (1 - t * 0.72);
+      this.block(x, baseY + height + 0.25 + i * 0.5, span + pier, 0.5, material);
+    }
+    // Portcullis.
+    for (let i = 0; i < 4; i++) {
+      this.block(x - width / 2 + (i + 0.5) * (width / 4), baseY + height * 0.5, 0.16, height * 0.9, "metal");
+    }
+    return baseY + height + 0.25 + steps * 0.5;
+  }
+
+  // ------------------------------------------------------------------ alien / mars
+
+  /** Half-dome of tangential panels. Habitats and hive chambers. */
+  dome(cx: number, baseY: number, radius: number, material: MaterialId, segments = 13, thickness = 0.45) {
+    for (let i = 0; i < segments; i++) {
+      const a = (Math.PI * (i + 0.5)) / segments;
+      const x = cx + Math.cos(a) * radius;
+      const y = baseY + Math.sin(a) * radius;
+      const segW = ((Math.PI * radius) / segments) * 1.08;
+      this.block(x, y, segW, thickness, material, a - Math.PI / 2);
+    }
+    return baseY + radius;
+  }
+
+  /** Tapering stack — alien needles and Martian comm masts. */
+  spire(x: number, baseY: number, height: number, baseW: number, material: MaterialId, lean = 0) {
+    const segs = Math.max(3, Math.round(height / 1.3));
+    const sh = height / segs;
+    for (let i = 0; i < segs; i++) {
+      const t = i / segs;
+      const w = baseW * (1 - t * 0.72);
+      const dx = lean * height * t * t;
+      this.block(x + dx, baseY + sh / 2 + i * sh, w, sh * 0.97, material, lean * 0.5 * t);
+    }
+    return baseY + height;
+  }
+
+  /** Cluster of organic pods stacked into a mound. */
+  hive(x: number, baseY: number, rows: number, material: MaterialId = "biomass") {
+    for (let r = 0; r < rows; r++) {
+      const n = rows - r;
+      const size = 0.9 - r * 0.05;
+      for (let c = 0; c < n; c++) {
+        this.block(x + (c - (n - 1) / 2) * size * 1.04, baseY + size / 2 + r * size * 0.92, size, size, material, rand(-0.06, 0.06));
+      }
+    }
+    return baseY + rows * 0.9;
+  }
+
+  /** A ring of crystal shards jutting from the ground at varied angles. */
+  crystalCluster(x: number, baseY: number, count: number, spread: number) {
+    for (let i = 0; i < count; i++) {
+      const a = rand(-0.5, 0.5);
+      const h = rand(1.6, 4.2);
+      this.block(x + rand(-spread, spread), baseY + (h / 2) * Math.cos(a), 0.5, h, "crystal", a);
+    }
   }
 
   /** Loose crates and barrels for texture and easy early destruction. */

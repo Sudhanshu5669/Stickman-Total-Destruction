@@ -1,17 +1,7 @@
 import type { GameCtx } from "../core/types";
-import type { Enemy } from "../entities/enemy";
-import { Builder } from "./builder";
-import { v, type V } from "../core/math";
-
-export interface LevelInfo {
-  name: string;
-  spawn: V;
-  /** World X limits the camera and the player are kept inside. */
-  bounds: { min: number; max: number };
-  enemies: Enemy[];
-  /** Ground height at the spawn, used to place the intro hint. */
-  groundY: number;
-}
+import type { Builder } from "./builder";
+import { v } from "../core/math";
+import type { LevelDef, LevelInfo } from "./types";
 
 /** One storey of `Builder.tower` = floor height + slab. Needed to line skybridges up. */
 const FLOOR_PITCH = 1.8 + 0.34;
@@ -25,8 +15,7 @@ const FLOOR_PITCH = 1.8 + 0.34;
  * Placement rule of thumb: put stickmen on flat surfaces. Anything standing on a
  * pitched roof slides off and dies before the player has fired a shot.
  */
-export function buildSandbox(game: GameCtx): LevelInfo {
-  const b = new Builder(game);
+function build(game: GameCtx, b: Builder): LevelInfo {
   const G0 = 0; // ground top surface
 
   // ---------------------------------------------------------------- terrain
@@ -116,10 +105,20 @@ export function buildSandbox(game: GameCtx): LevelInfo {
   b.enemy("boss", 262, G0, -1);
 
   return {
-    name: "Sandbox 01 — Test Range",
     spawn: v(-30, G0 + 1.2),
     bounds: { min: -120, max: 275 },
     enemies: b.enemies,
     groundY: G0,
   };
 }
+
+export const SANDBOX: LevelDef = {
+  id: "sandbox",
+  name: "Test Range",
+  tagline: "Daylight, crates and a skyline. Learn what each round does here.",
+  theme: "day",
+  gravity: -26,
+  tags: ["DAYLIGHT", "SANDBOX", "TUTORIAL"],
+  accent: "#ffd23f",
+  build,
+};

@@ -2,6 +2,7 @@ import type { Camera } from "./camera";
 import type { Physics } from "./physics";
 import type { Particles } from "../fx/particles";
 import type { Ctx } from "../render/draw";
+import type { Theme } from "../render/theme";
 import type { V } from "./math";
 
 /** Anything that lives in the world, ticks, and draws. */
@@ -20,6 +21,8 @@ export interface Actor {
   cullPos?(): V;
   /** Radius around `cullPos()` that must be off-screen before the actor is skipped. */
   cullRadius?: number;
+  /** Implemented by anything corrosive weather can eat: blocks, characters. */
+  takeAcid?(amount: number): void;
 }
 
 /**
@@ -30,6 +33,8 @@ export interface GameCtx {
   readonly physics: Physics;
   readonly particles: Particles;
   readonly camera: Camera;
+  /** Palette of the world currently loaded. */
+  readonly theme: Theme;
   /** Seconds since the level started, scaled by slow-motion. */
   readonly time: number;
 
@@ -47,4 +52,10 @@ export interface GameCtx {
   alertEnemiesNear(at: V, radius: number): void;
   /** Spawns a physical rubble chunk, subject to the global debris cap. */
   spawnDebris(x: number, y: number, size: number, color: string, vel: V): void;
+  /**
+   * Everything that can be damaged — blocks, enemies, the player. **Index 0 is always
+   * the player**, so hazards can give it priority over the round-robin sampling they
+   * use for the rest of the world. Also used by attract-mode AI to find targets.
+   */
+  damageables(): readonly Actor[];
 }

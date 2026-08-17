@@ -13,6 +13,18 @@ npm run dev      # http://localhost:5173
 npm run build    # -> dist/, ready to zip and upload
 ```
 
+## Worlds
+
+Pick one from the start menu — the selected world plays itself behind the menu, driven by
+the same character and physics you're about to control.
+
+| World | Twist |
+| --- | --- |
+| **Test Range** | Daylight sandbox. Crates, houses and a skyline. Learn the arsenal here. |
+| **Blackthorn Keep** | Night siege. Curtain walls, gatehouse, crenellated towers and a keep. Stone shrugs off the light rounds. |
+| **Xenoform Basin** | Hive world under corrosive rain. Anything with open sky above it takes damage — including you. Roofs are real cover. |
+| **Ares Colony** | Mars at roughly a third gravity. You jump ~4.6m instead of ~1.7m, and every round carries about three times as far. |
+
 ## Controls
 
 | Input | Action |
@@ -24,8 +36,12 @@ npm run build    # -> dist/, ready to zip and upload
 | `1`–`9`, `Q` / `E`, wheel | Switch ammo |
 | `S` | Crouch |
 | `R` | Go limp (toggle full ragdoll) |
-| `F` | Reset the level |
-| `P` / `Esc` | Pause · `M` mute · `F3` debug overlay |
+| `F` | Restart the level |
+| `Esc` / `P` | Pause — Resume / Restart / Main Menu |
+| `M` | Mute |
+| `F3` | Debug overlay (fps, bodies, particles) |
+
+In the menu: `←` `→` choose world, `Enter` play, or click a card and then **PLAY**.
 
 **Recoil is a movement tool.** The heavy rounds kick hard enough to launch you across the
 map. Firing an elephant while standing still will put you on your back.
@@ -65,11 +81,16 @@ src/
   core/        math, input, camera, physics wrapper, shared types
   entities/    ragdoll, player, enemy, block/terrain/debris, projectile
   weapons/     ammo registry, the gun
-  render/      draw helpers, stickman + creature renderers, prop art, parallax backdrop
+  render/      draw helpers, stickman + creature renderers, prop art, backdrop, themes
   fx/          particle pool, procedural WebAudio
-  levels/      structure builder + the sandbox level
-  ui/          HUD
+  levels/      structure builder, the four worlds, weather hazards
+  ai/          attract-mode driver
+  ui/          HUD, start menu + pause menu
 ```
+
+A world is a `LevelDef` (`src/levels/types.ts`): a palette (`Theme`), a gravity value, a
+`build()` that lays out structures with `Builder`, and an optional hazard. Adding a fifth
+world means adding one file and one entry in `src/levels/index.ts` — no engine changes.
 
 ## How it works
 
@@ -141,9 +162,9 @@ poking.
 
 ## Known gaps / next steps
 
-- **Sandbox only.** One level, no objectives, no progression — per the brief, core
-  mechanics first. `levels/builder.ts` has the pieces (towers, houses, walls, pyramids,
-  bridges, catwalks) to author more quickly.
+- **No objectives or progression.** Four worlds, but each is a sandbox — nothing to
+  complete. `levels/builder.ts` has the pieces (towers, houses, walls, pyramids, bridges,
+  catwalks, battlements, domes, spires, hives) to author more quickly.
 - **Bundle size** is 837 KB gzipped, nearly all of it Rapier's base64-inlined WASM.
   Switching to `@dimforge/rapier2d` (separate `.wasm` file) would cut that meaningfully and
   parse faster, at the cost of needing a WASM plugin in the build.

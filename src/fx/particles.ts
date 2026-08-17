@@ -31,6 +31,12 @@ const MAX = 1400;
 export class Particles {
   private pool: Particle[] = [];
   private count = 0;
+  /**
+   * World gravity multiplier, set per level. Only applied to particles that *fall*
+   * (negative gravity); smoke and fire carry authored buoyancy that shouldn't change
+   * just because the planet did.
+   */
+  gravityScale = 1;
 
   constructor() {
     for (let i = 0; i < MAX; i++) this.pool.push(blank());
@@ -197,7 +203,7 @@ export class Particles {
       const d = Math.exp(-p.drag * dt);
       p.vx *= d;
       p.vy *= d;
-      p.vy += p.gravity * dt;
+      p.vy += (p.gravity < 0 ? p.gravity * this.gravityScale : p.gravity) * dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.angle += p.spin * dt;
