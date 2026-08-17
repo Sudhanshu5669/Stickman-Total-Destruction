@@ -600,6 +600,8 @@ export class Game implements GameCtx {
     return {
       hp: this.player.hp,
       maxHp: this.player.maxHp,
+      fuel: this.player.fuelFrac,
+      jetThrottle: this.player.jetThrottle,
       score: this.score,
       displayScore: this.displayScore,
       combo: this.combo,

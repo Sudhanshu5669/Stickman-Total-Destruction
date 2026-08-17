@@ -7,6 +7,10 @@ import type { Weapon } from "../weapons/weapon";
 export interface HudState {
   hp: number;
   maxHp: number;
+  /** Jetpack tank, 0..1. */
+  fuel: number;
+  /** Jetpack throttle, 0..1 — makes the gauge glow while burning. */
+  jetThrottle: number;
   score: number;
   displayScore: number;
   combo: number;
@@ -82,7 +86,8 @@ export class Hud {
     const bw = 260 * k;
     const bh = 26 * k;
 
-    panel(ctx, x - 8 * k, y - 8 * k, bw + 16 * k, bh + 52 * k, k);
+    const fuelH = 12 * k;
+    panel(ctx, x - 8 * k, y - 8 * k, bw + 16 * k, bh + fuelH + 62 * k, k);
 
     // Health.
     ctx.fillStyle = "rgba(0,0,0,0.45)";
@@ -96,9 +101,24 @@ export class Hud {
     text(ctx, `${Math.ceil(s.hp)}`, x + 10 * k, y + bh / 2, 14 * k, INK, "left", "middle", 900);
     text(ctx, "HP", x + bw - 10 * k, y + bh / 2, 12 * k, "rgba(0,0,0,0.5)", "right", "middle", 900);
 
+    // Jetpack fuel, directly under health so the two read as one status block.
+    const fy = y + bh + 5 * k;
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    roundRect(ctx, x, fy, bw, fuelH, 4 * k);
+    ctx.fill();
+    const fuel = clamp(s.fuel, 0, 1);
+    // Glows hot while burning, dims to amber when nearly dry.
+    ctx.fillStyle = s.jetThrottle > 0.05
+      ? `rgba(255,${190 + Math.round(s.jetThrottle * 50)},120,1)`
+      : fuel > 0.25 ? "#5ec8ff" : "#e8433a";
+    roundRect(ctx, x + 2 * k, fy + 2 * k, (bw - 4 * k) * fuel, fuelH - 4 * k, 3 * k);
+    ctx.fill();
+    text(ctx, "JETPACK", x + bw - 8 * k, fy + fuelH / 2 + 0.5 * k, 8 * k, "rgba(0,0,0,0.55)", "right", "middle", 900);
+
     // Score, counting up so big hits feel like they land.
-    text(ctx, s.displayScore.toLocaleString("en-US"), x, y + bh + 34 * k, 30 * k, CREAM, "left", "alphabetic", 900, "rgba(0,0,0,0.6)");
-    text(ctx, "SCORE", x + 4 * k + ctx.measureText(s.displayScore.toLocaleString("en-US")).width, y + bh + 34 * k, 12 * k, "rgba(244,241,232,0.5)", "left", "alphabetic", 800);
+    const scoreY = fy + fuelH + 32 * k;
+    text(ctx, s.displayScore.toLocaleString("en-US"), x, scoreY, 30 * k, CREAM, "left", "alphabetic", 900, "rgba(0,0,0,0.6)");
+    text(ctx, "SCORE", x + 4 * k + ctx.measureText(s.displayScore.toLocaleString("en-US")).width, scoreY, 12 * k, "rgba(244,241,232,0.5)", "left", "alphabetic", 800);
   }
 
   private drawTopRight(ctx: Ctx, w: number, k: number, s: HudState) {
@@ -197,7 +217,7 @@ export class Hud {
     ctx.globalAlpha = s.hintAlpha;
     const lines = [
       ["A / D", "move"],
-      ["SPACE", "jump"],
+      ["SPACE", "jump · hold to fly"],
       ["MOUSE", "aim"],
       ["CLICK", "fire"],
       ["1-9 / Q E / WHEEL", "swap ammo"],

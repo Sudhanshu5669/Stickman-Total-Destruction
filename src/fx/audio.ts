@@ -273,6 +273,67 @@ export class Sfx {
     this.noise({ dur: 0.25, gain: 0.12, freq: 4200, q: 3, type: "bandpass" });
   }
 
+  // --------------------------------------------------------- sustained sources
+
+  private jetGain: GainNode | null = null;
+  private jetFilter: BiquadFilterNode | null = null;
+  private jetTone: OscillatorNode | null = null;
+
+  /**
+   * Continuous jetpack roar. Call every frame with a 0..1 throttle; 0 fades it out.
+   *
+   * Unlike every other sound here this is a persistent graph rather than a one-shot.
+   * It is built once and then left running with its gain modulated — starting and
+   * stopping a source every frame clicks, and juggling the lifecycle is where looping
+   * WebAudio usually goes wrong.
+   */
+  jetpack(throttle: number) {
+    if (!this.ctx) return;
+    const t = clamp(throttle, 0, 1);
+
+    if (!this.jetGain) {
+      if (t <= 0.001) return; // don't build the graph until it's first needed
+      const c = this.ctx;
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+
+      const filter = c.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 700;
+      filter.Q.value = 0.9;
+
+      const gain = c.createGain();
+      gain.gain.value = 0.0001;
+
+      // A low sawtooth under the noise gives it body rather than just hiss.
+      const tone = c.createOscillator();
+      tone.type = "sawtooth";
+      tone.frequency.value = 70;
+      const toneGain = c.createGain();
+      toneGain.gain.value = 0.35;
+
+      src.connect(filter);
+      filter.connect(gain);
+      tone.connect(toneGain);
+      toneGain.connect(gain);
+      gain.connect(this.master);
+      src.start();
+      tone.start();
+
+      this.jetGain = gain;
+      this.jetFilter = filter;
+      this.jetTone = tone;
+    }
+
+    const now = this.t;
+    // setTargetAtTime gives a smooth exponential ramp without scheduling a new
+    // automation event per frame.
+    this.jetGain.gain.setTargetAtTime(t <= 0.001 ? 0.0001 : 0.05 + t * 0.13, now, 0.04);
+    this.jetFilter!.frequency.setTargetAtTime(600 + t * 1900, now, 0.06);
+    this.jetTone!.frequency.setTargetAtTime(62 + t * 46, now, 0.08);
+  }
+
   /** Corrosive rain on stone — a wet sizzle, not a splash. */
   acidHiss() {
     if (!this.budget()) return;

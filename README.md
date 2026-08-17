@@ -30,7 +30,7 @@ the same character and physics you're about to control.
 | Input | Action |
 | --- | --- |
 | `A` / `D` | Move |
-| `Space` | Jump |
+| `Space` | Jump — **hold while airborne to fly the jetpack** |
 | Mouse | Aim |
 | Left click | Fire (hold for automatic rounds) |
 | `1`–`9`, `Q` / `E`, wheel | Switch ammo |
@@ -45,6 +45,13 @@ In the menu: `←` `→` choose world, `Enter` play, or click a card and then **
 
 **Recoil is a movement tool.** The heavy rounds kick hard enough to launch you across the
 map. Firing an elephant while standing still will put you on your back.
+
+**The jetpack** holds ~2.5 seconds of burn and refills only once you are back on the
+ground, so it is a traversal and rescue tool rather than free flight. A full tank lifts
+you about 25 m — enough to reach most rooftops, and enough to save you after a shot throws
+you off a tower. Thrust is expressed as *net* acceleration on top of the world's gravity,
+so the pack handles identically on Earth and on Mars instead of being feeble on one and
+uncontrollable on the other. It cuts out while you are knocked down.
 
 ## The arsenal
 

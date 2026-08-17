@@ -27,6 +27,8 @@ export class DemoDriver {
   private fireTimer = 0;
   private burstLeft = 0;
   private jumpTimer = rand(2, 5);
+  /** Seconds of jetpack burn left in the current hop. */
+  private flyLeft = 0;
   /** Smoothed aim so the gun sweeps between targets instead of snapping. */
   private aimSmooth: V = v(0, 0);
 
@@ -55,11 +57,15 @@ export class DemoDriver {
     const dx = this.roamTarget - pos.x;
     c.moveX = Math.abs(dx) < 1.5 ? 0 : Math.sign(dx);
 
+    // Jump, and sometimes hold it to show the jetpack off.
     this.jumpTimer -= dt;
     if (this.jumpTimer <= 0) {
       this.jumpTimer = rand(2.5, 6);
       c.jumpPressed = true;
+      this.flyLeft = Math.random() < 0.55 ? rand(0.9, 2.2) : 0;
     }
+    this.flyLeft = Math.max(0, this.flyLeft - dt);
+    c.jumpHeld = this.flyLeft > 0;
 
     // --- target selection ---------------------------------------------------
     this.targetTimer -= dt;

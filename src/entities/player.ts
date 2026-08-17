@@ -4,8 +4,8 @@ import type { Input } from "../core/input";
 import { BIPED, Ragdoll } from "./ragdoll";
 import { Weapon } from "../weapons/weapon";
 import { drawBiped } from "../render/creatures";
-import { angleDelta, clamp, damp, norm, v, type V } from "../core/math";
-import { disc, rgba, type Ctx } from "../render/draw";
+import { angleDelta, clamp, damp, norm, rand, v, type V } from "../core/math";
+import { at, disc, poly, rgba, roundBox, type Ctx } from "../render/draw";
 import { sfx } from "../fx/audio";
 
 /** Everything worth feeling out, in one block. */
@@ -27,6 +27,23 @@ const TUNE = {
   jumpSpeed: 9.6,
   coyote: 0.12,
   jumpBuffer: 0.14,
+
+  /**
+   * Jetpack. Thrust is expressed as *net* acceleration on top of whatever the world's
+   * gravity is, so the pack lifts identically on Earth and on Mars — a fixed thrust
+   * would be feeble at -26 and uncontrollable at -9.6.
+   */
+  jetNetAccel: 15,
+  /** Rise speed cap, so holding thrust doesn't accelerate into orbit. */
+  jetMaxRise: 9.5,
+  /** Seconds of continuous burn from full. */
+  jetFuelMax: 2.5,
+  /** Fuel-seconds recovered per second while standing on something. */
+  jetRefill: 1.5,
+  /** Grace after landing before the tank starts refilling. */
+  jetRefillDelay: 0.3,
+  /** Horizontal control authority while the pack is lit. */
+  jetAirAccel: 48,
 
   /** Upright PD gains, in rad/s^2 per rad and per rad/s. */
   uprightK: 46,
@@ -72,6 +89,8 @@ const TUNE = {
 export interface PlayerControl {
   moveX: number;
   jumpPressed: boolean;
+  /** Held state of the jump control — this is what lights the jetpack. */
+  jumpHeld: boolean;
   crouch: boolean;
   /** World-space point to aim at. */
   aimWorld: V;
@@ -82,7 +101,7 @@ export interface PlayerControl {
 }
 
 export const blankControl = (): PlayerControl => ({
-  moveX: 0, jumpPressed: false, crouch: false, aimWorld: v(1, 0),
+  moveX: 0, jumpPressed: false, jumpHeld: false, crouch: false, aimWorld: v(1, 0),
   fireHeld: false, firePressed: false, selectAmmo: null, cycleAmmo: 0,
 });
 
@@ -116,6 +135,13 @@ export class Player implements Actor {
   /** Rises while airborne after a big recoil shot, purely for the camera to react to. */
   launchBoost = 0;
 
+  /** Seconds of jetpack burn remaining. */
+  fuel = TUNE.jetFuelMax;
+  /** Smoothed 0..1 throttle, used for the exhaust, the audio and the HUD. */
+  jetThrottle = 0;
+  private jetLit = false;
+  private jetGroundTimer = 0;
+
   spawn: V;
   kills = 0;
 
@@ -145,6 +171,9 @@ export class Player implements Actor {
     this.getUpLeft = 0;
     this.respawnLeft = 0;
     this.manualRagdoll = false;
+    this.fuel = TUNE.jetFuelMax;
+    this.jetThrottle = 0;
+    this.jetLit = false;
     this.ragdoll.lockRoot(true);
   }
 
@@ -179,6 +208,10 @@ export class Player implements Actor {
 
   get respawnIn() {
     return Math.max(0, this.respawnLeft);
+  }
+
+  get fuelFrac() {
+    return clamp(this.fuel / TUNE.jetFuelMax, 0, 1);
   }
 
   cullRadius = 3;
@@ -220,6 +253,10 @@ export class Player implements Actor {
     const j = this.control.jumpPressed;
     this.control.jumpPressed = false;
     return j;
+  }
+
+  private get wantJumpHeld() {
+    return this.control ? this.control.jumpHeld : this.input.held("Space", "KeyW", "ArrowUp");
   }
 
   private get wantFireHeld() {
@@ -334,12 +371,16 @@ export class Player implements Actor {
 
     if (this.controllable) {
       this.balance(dt);
+      this.jetpack(dt);
       this.locomotion(dt);
       this.jump(dt);
       this.poseLimbs(dt);
     } else {
       this.coyoteLeft = 0;
+      this.jetLit = false;
+      this.jetThrottle = damp(this.jetThrottle, 0, 10, dt);
     }
+    sfx.jetpack(this.jetThrottle);
 
     if (this.pos.y < -45) {
       // Fell off the world.
@@ -486,13 +527,87 @@ export class Player implements Actor {
     }
   }
 
+  /**
+   * Hold the jump control while airborne to burn fuel and fly.
+   *
+   * Thrust is applied as a uniform velocity change across every bone (like the jump)
+   * rather than a shove on the hips, so the body rises as one piece instead of being
+   * dragged up by its pelvis. Gravity is cancelled first and a fixed net acceleration
+   * added on top, which keeps the pack feeling the same on every world.
+   */
+  private jetpack(dt: number) {
+    const wants = this.wantJumpHeld && !this.grounded && this.fuel > 0;
+    this.jetLit = wants;
+
+    if (wants) {
+      this.fuel = Math.max(0, this.fuel - dt);
+      this.jetGroundTimer = TUNE.jetRefillDelay;
+
+      const gravity = Math.abs(this.game.physics.world.gravity.y);
+      const vy = this.ragdoll.bone("pelvis").body.linvel().y;
+      // Ease off as the rise cap is approached so it settles instead of clipping.
+      const headroom = clamp((TUNE.jetMaxRise - vy) / TUNE.jetMaxRise, 0, 1);
+      const accel = gravity + TUNE.jetNetAccel * headroom;
+      this.ragdoll.applyImpulse(v(0, accel * dt));
+      this.launchBoost = Math.max(this.launchBoost, 0.35);
+
+      this.emitExhaust(dt);
+    } else if (this.grounded) {
+      this.jetGroundTimer = Math.max(0, this.jetGroundTimer - dt);
+      if (this.jetGroundTimer <= 0 && this.fuel < TUNE.jetFuelMax) {
+        this.fuel = Math.min(TUNE.jetFuelMax, this.fuel + TUNE.jetRefill * dt);
+      }
+    }
+
+    this.jetThrottle = damp(this.jetThrottle, wants ? 1 : 0, wants ? 22 : 9, dt);
+  }
+
+  /** Twin plumes out of the pack's nozzles, in world space. */
+  private emitExhaust(dt: number) {
+    const torso = this.ragdoll.bones.get("torso");
+    if (!torso) return;
+    const rot = torso.body.rotation();
+    const cos = Math.cos(rot);
+    const sin = Math.sin(rot);
+    const back = -0.17 * this.facing;
+
+    for (const side of [-0.09, 0.09]) {
+      const lx = back + side * this.facing;
+      const ly = -0.22;
+      const px = torso.body.translation().x + lx * cos - ly * sin;
+      const py = torso.body.translation().y + lx * sin + ly * cos;
+      // Down the torso's own axis, so the plume tilts as he does.
+      const dx = sin * 5;
+      const dy = -cos * 5;
+      if (Math.random() < dt * 100) {
+        this.game.particles.emit("fire", px, py, {
+          vx: dx + rand(-1.2, 1.2), vy: dy + rand(-1.2, 1.2),
+          maxLife: rand(0.12, 0.3), size: rand(0.1, 0.22), grow: -0.3,
+          drag: 3, gravity: 1.5,
+          color: Math.random() < 0.5 ? "#fff3b0" : "#ffb03a",
+        });
+      }
+      // Sparse, small and short-lived. The stock smoke preset is sized for
+      // explosions and buries the whole character in a cloud within a second.
+      if (Math.random() < dt * 9) {
+        this.game.particles.emit("smoke", px + rand(-0.08, 0.08), py - 0.25, {
+          vx: dx * 0.25 + rand(-0.6, 0.6), vy: dy * 0.25 + rand(-0.4, 0.4),
+          maxLife: rand(0.35, 0.7), size: rand(0.08, 0.16), grow: rand(0.5, 0.9),
+          drag: 2.4, gravity: 0.6, color: "#9aa3b0",
+        });
+      }
+    }
+  }
+
   private locomotion(dt: number) {
     const move = this.wantMoveX;
     const pelvis = this.ragdoll.bone("pelvis").body;
     const torso = this.ragdoll.bone("torso").body;
 
     const maxSpeed = this.grounded ? TUNE.runSpeed : TUNE.airSpeed;
-    const accel = this.grounded ? TUNE.groundAccel : TUNE.airAccel;
+    // The pack gives real steering authority; drifting helplessly while flying is
+    // the difference between a jetpack and a firework.
+    const accel = this.grounded ? TUNE.groundAccel : this.jetLit ? TUNE.jetAirAccel : TUNE.airAccel;
     const target = move * maxSpeed;
     const vx = pelvis.linvel().x;
 
@@ -614,6 +729,8 @@ export class Player implements Actor {
       disc(ctx, c.x, c.y, 1.05, rgba("#5ec8ff", 0.12), rgba("#5ec8ff", 0.4), 0.05);
     }
 
+    this.drawJetpack(ctx);
+
     drawBiped(ctx, r, {
       ink: "#14171f",
       fill: "#14171f",
@@ -624,6 +741,61 @@ export class Player implements Actor {
     if (!r.dead) {
       this.weapon.draw(ctx, this.hand, this.aimAngle + this.weapon.swayAngle(this.game.time), this.game.time);
     }
+  }
+
+  /**
+   * The pack, drawn on the torso's back and behind the figure so the stickman
+   * silhouette stays clean. Twin tanks, twin nozzles, exhaust scaled by throttle.
+   */
+  private drawJetpack(ctx: Ctx) {
+    const torso = this.ragdoll.bones.get("torso");
+    if (!torso) return;
+    const t = torso.body.translation();
+    const back = -0.17 * this.facing;
+    const thr = this.jetThrottle;
+
+    at(ctx, t.x, t.y, torso.body.rotation(), () => {
+      ctx.translate(back, -0.02);
+
+      // Flames first, so the hardware sits on top of them.
+      if (thr > 0.02) {
+        const flicker = 0.75 + Math.sin(this.game.time * 55) * 0.25;
+        for (const side of [-0.09, 0.09]) {
+          const len = (0.34 + thr * 0.62) * flicker;
+          const w = 0.07 + thr * 0.05;
+          ctx.globalAlpha = Math.min(1, thr * 1.4);
+          poly(ctx, [
+            [side * this.facing - w, -0.2],
+            [side * this.facing + w, -0.2],
+            [side * this.facing, -0.2 - len],
+          ], "#ffb03a", null);
+          poly(ctx, [
+            [side * this.facing - w * 0.5, -0.2],
+            [side * this.facing + w * 0.5, -0.2],
+            [side * this.facing, -0.2 - len * 0.6],
+          ], "#fff3b0", null);
+          ctx.globalAlpha = 1;
+        }
+      }
+
+      roundBox(ctx, 0.3, 0.4, 0.08, "#39414f", "#171b23", 0.035);
+      // Tank ribs.
+      ctx.strokeStyle = rgba("#000000", 0.28);
+      ctx.lineWidth = 0.025;
+      for (const y of [-0.08, 0.08]) {
+        ctx.beginPath();
+        ctx.moveTo(-0.15, y);
+        ctx.lineTo(0.15, y);
+        ctx.stroke();
+      }
+      // Nozzles.
+      for (const side of [-0.09, 0.09]) {
+        roundBox2(ctx, side * this.facing, -0.23, 0.1, 0.11, "#2a3040", "#171b23");
+      }
+      // Fuel light: green with charge, red when dry.
+      const f = clamp(this.fuel / TUNE.jetFuelMax, 0, 1);
+      disc(ctx, 0, 0.13, 0.035, f > 0.25 ? "#6ddc7a" : "#e8433a", "#171b23", 0.02);
+    });
   }
 
   /**
@@ -659,6 +831,14 @@ export class Player implements Actor {
   destroy() {
     this.ragdoll.destroy();
   }
+}
+
+/** Offset rounded box, since `roundBox` is centred on the current origin. */
+function roundBox2(ctx: Ctx, x: number, y: number, w: number, h: number, fill: string, stroke: string) {
+  ctx.save();
+  ctx.translate(x, y);
+  roundBox(ctx, w, h, 0.03, fill, stroke, 0.03);
+  ctx.restore();
 }
 
 const wrapPi = (a: number) => {
