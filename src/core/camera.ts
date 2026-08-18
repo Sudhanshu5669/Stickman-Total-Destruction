@@ -61,10 +61,18 @@ export class Camera {
     this.shakeAngle = rand(-s * 0.05, s * 0.05);
   }
 
-  /** Installs world->screen transform. Call inside save()/restore(). */
-  apply(ctx: CanvasRenderingContext2D, w: number, h: number) {
+  /**
+   * Records the viewport. `screenToWorld` needs it, and unprojecting the mouse has to
+   * happen *before* the world is drawn, so it cannot wait for `apply()`.
+   */
+  setViewport(w: number, h: number) {
     this.viewW = w;
     this.viewH = h;
+  }
+
+  /** Installs world->screen transform. Call inside save()/restore(). */
+  apply(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    this.setViewport(w, h);
     const z = this.zoom * (1 + this.punch);
     ctx.translate(w / 2, h / 2);
     ctx.rotate(this.shakeAngle);
@@ -76,20 +84,41 @@ export class Camera {
     return this.zoom * (1 + this.punch);
   }
 
+  /**
+   * Exact inverse of `apply()`, **including the shake roll**. Leaving the rotation out
+   * costs up to ~35px of error at the edge of a 1440p viewport during heavy trauma,
+   * which shows up as the crosshair and the gun disagreeing exactly when the screen is
+   * shaking and you most want to trust your aim.
+   */
   screenToWorld(sx: number, sy: number): V {
     const z = this.effectiveZoom;
+    let dx = sx - this.viewW / 2;
+    let dy = sy - this.viewH / 2;
+    if (this.shakeAngle !== 0) {
+      const c = Math.cos(-this.shakeAngle);
+      const s = Math.sin(-this.shakeAngle);
+      const rx = dx * c - dy * s;
+      dy = dx * s + dy * c;
+      dx = rx;
+    }
     return v(
-      (sx - this.viewW / 2) / z + this.pos.x + this.shakeOffset.x,
-      -(sy - this.viewH / 2) / z + this.pos.y + this.shakeOffset.y,
+      dx / z + this.pos.x + this.shakeOffset.x,
+      -dy / z + this.pos.y + this.shakeOffset.y,
     );
   }
 
   worldToScreen(p: V): V {
     const z = this.effectiveZoom;
-    return v(
-      (p.x - this.pos.x - this.shakeOffset.x) * z + this.viewW / 2,
-      -(p.y - this.pos.y - this.shakeOffset.y) * z + this.viewH / 2,
-    );
+    let dx = (p.x - this.pos.x - this.shakeOffset.x) * z;
+    let dy = -(p.y - this.pos.y - this.shakeOffset.y) * z;
+    if (this.shakeAngle !== 0) {
+      const c = Math.cos(this.shakeAngle);
+      const s = Math.sin(this.shakeAngle);
+      const rx = dx * c - dy * s;
+      dy = dx * s + dy * c;
+      dx = rx;
+    }
+    return v(dx + this.viewW / 2, dy + this.viewH / 2);
   }
 
   /** Half-extents of the visible world rect, plus `pad` metres of slack for culling. */

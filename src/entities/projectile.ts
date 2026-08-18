@@ -46,6 +46,12 @@ export interface ProjectileConfig {
   explode?: ExplodeSpec;
   splat?: { color: string; count: number };
   attract?: { radius: number; strength: number; duration: number };
+  /**
+   * Flash-freezes everything within `radius` of each contact point. Frozen bodies
+   * turn brittle — the next touch of any strength destroys them. The fridge's whole
+   * gimmick, and the reason `PhysOwner.freeze` exists.
+   */
+  freeze?: { radius: number };
   /** Flat extra damage applied to whatever it touches, on top of kinetic damage. */
   bonusDamage: number;
   impactSound: ImpactSound;
@@ -243,12 +249,29 @@ export class RigidProjectile implements Actor, PhysOwner {
       this.playImpactSound(clamp(kj / 40, 0.15, 1));
     }
 
+    if (c.freeze) this.freezeAround(point, other);
+
     if (c.splat && kj > 1.2) {
       this.game.particles.blood(point.x, point.y, 16, normal, 9, c.splat.color);
       this.game.particles.shards(point.x, point.y, 8, c.splat.color, 5);
     }
 
     if (c.explode && kj >= c.explode.minEnergy) this.detonate();
+  }
+
+  /**
+   * Freezes the thing that was hit plus anything sharing the contact point. The
+   * radius is small on purpose: it should read as "the fridge touched it", not as an
+   * area-of-effect blast.
+   */
+  private freezeAround(point: V, other: PhysOwner | null) {
+    const r = this.cfg.freeze!.radius;
+    other?.freeze?.();
+    for (const o of this.game.physics.ownersInRadius(point, r)) {
+      if (o !== this) o.freeze?.();
+    }
+    this.game.particles.sparks(point.x, point.y, 10, 5, "#d6f2ff");
+    this.game.particles.dust(point.x, point.y, 6, 2.2, "#e4f7ff");
   }
 
   private playImpactSound(strength: number) {

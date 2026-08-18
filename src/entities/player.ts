@@ -4,7 +4,7 @@ import type { Input } from "../core/input";
 import { BIPED, Ragdoll } from "./ragdoll";
 import { Weapon } from "../weapons/weapon";
 import { drawBiped } from "../render/creatures";
-import { angleDelta, clamp, damp, norm, rand, v, type V } from "../core/math";
+import { angleDelta, clamp, damp, lerp, norm, rand, remap, smoothstep, v, type V } from "../core/math";
 import { at, disc, poly, rgba, roundBox, type Ctx } from "../render/draw";
 import { sfx } from "../fx/audio";
 
@@ -45,6 +45,14 @@ const TUNE = {
   /** Horizontal control authority while the pack is lit. */
   jetAirAccel: 48,
 
+  /**
+   * Aim pivot blend, in metres from the hand to the crosshair. Below `aimPivotNear`
+   * the aim pivots on the shoulder (stable); above `aimPivotFar` it pivots on the
+   * hand, so the shot passes exactly through the crosshair. See `updateAim`.
+   */
+  aimPivotNear: 0.9,
+  aimPivotFar: 2.4,
+
   /** Upright PD gains, in rad/s^2 per rad and per rad/s. */
   uprightK: 46,
   uprightD: 11,
@@ -62,8 +70,13 @@ const TUNE = {
   /** High: the spine carries the head, both arms and a large gun against gravity. */
   spineStiff: 2200,
   spineDamp: 110,
-  neckStiff: 120,
-  neckDamp: 12,
+  /**
+   * The neck carries a 9kg ball on a short lever. At the old gains (120/12) the spring
+   * lost to gravity on every step and the head hung limp — held up only by the joint
+   * limit. It needs to be in the same league as the spine that supports it.
+   */
+  neckStiff: 1400,
+  neckDamp: 70,
 
   /** Fraction of a shot's recoil that actually moves the body. */
   recoilTransfer: 0.62,
@@ -165,6 +178,9 @@ export class Player implements Actor {
     this.ragdoll.impactIgnore = 3.2;
     this.ragdoll.impactFragility = 6.5;
     this.ragdoll.damageScale = TUNE.selfDamage;
+    // The fridge freezes everything it touches; being flash-frozen and one-shot by
+    // your own round would just be a fast way to lose a run.
+    this.ragdoll.freezable = false;
     this.ragdoll.invulnerable = true;
     this.ragdoll.onHurt = (_r, amount, at) => this.onHurt(amount, at);
     this.ragdoll.onDeath = () => this.onDeath();
@@ -272,11 +288,12 @@ export class Player implements Actor {
     return f;
   }
 
+  /**
+   * Direct slot selection is AI-only now. The arsenal outgrew the number row, so the
+   * human path walks the list with 1/3 (see `takeAmmoCycle`) instead.
+   */
   private takeAmmoSelect(): number | null {
-    if (!this.control) {
-      const d = this.input.digitPressed();
-      return d > 0 ? d - 1 : null;
-    }
+    if (!this.control) return null;
     const s = this.control.selectAmmo;
     this.control.selectAmmo = null;
     return s;
@@ -284,7 +301,9 @@ export class Player implements Actor {
 
   private takeAmmoCycle(): number {
     if (!this.control) {
-      return this.input.wheel + (this.input.pressed("KeyE") ? 1 : 0) - (this.input.pressed("KeyQ") ? 1 : 0);
+      const back = this.input.pressed("Digit1", "Numpad1", "KeyQ") ? 1 : 0;
+      const fwd = this.input.pressed("Digit3", "Numpad3", "KeyE") ? 1 : 0;
+      return this.input.wheel + fwd - back;
     }
     const c = this.control.cycleAmmo;
     this.control.cycleAmmo = 0;
@@ -433,13 +452,36 @@ export class Player implements Actor {
     this.updateAim();
   }
 
+  /**
+   * Turns the crosshair into a firing angle.
+   *
+   * The pivot has to be the **hand**, because that is what actually shoots: the gun is
+   * drawn at `hand`, `fire()` spawns from `hand`, and `drawTrajectory` starts its arc
+   * at `hand`. Pivoting anywhere else produces a shot line *parallel* to the line you
+   * are pointing at rather than one through it, and a parallel offset never converges
+   * — it misses by the same metre at any range. The arm is a motorised joint that
+   * visibly trails a fast mouse swing or a recoil kick, so that offset is not even
+   * constant, which is what makes the aim feel loose.
+   *
+   * Close in, though, the hand is a bad pivot: inside arm's reach it swings further
+   * than the cursor does, and aiming off it would oscillate. So the pivot eases back
+   * to the shoulder as the target comes within a couple of metres.
+   */
   private updateAim() {
     const world = this.control
       ? this.control.aimWorld
       : this.game.camera.screenToWorld(this.input.mouse.x, this.input.mouse.y);
     this.aim = world;
-    const from = this.chest;
-    const d = norm(v(world.x - from.x, world.y - from.y));
+
+    const hand = this.hand;
+    const chest = this.chest;
+    const reach = Math.hypot(world.x - hand.x, world.y - hand.y);
+    const t = smoothstep(remap(reach, TUNE.aimPivotNear, TUNE.aimPivotFar, 0, 1));
+    const px = lerp(chest.x, hand.x, t);
+    const py = lerp(chest.y, hand.y, t);
+
+    const d = norm(v(world.x - px, world.y - py));
+    if (d.x === 0 && d.y === 0) return;
     this.aimAngle = Math.atan2(d.y, d.x);
     this.facing = Math.cos(this.aimAngle) >= 0 ? 1 : -1;
   }
@@ -455,7 +497,9 @@ export class Player implements Actor {
     const cycle = this.takeAmmoCycle();
     if (cycle) w.cycle(cycle);
     const select = this.takeAmmoSelect();
-    if (select !== null) w.select(select);
+    // A digit past the end of the issued loadout does nothing, rather than wrapping
+    // round to something you were never given.
+    if (select !== null && select < w.list.length) w.select(select);
 
     const pressed = this.takeFirePressed();
     if (!this.controllable) return;
@@ -551,11 +595,13 @@ export class Player implements Actor {
    * added on top, which keeps the pack feeling the same on every world.
    */
   private jetpack(dt: number) {
+    // God mode runs the pack off an infinite tank: no burn, no refill wait.
+    if (this.god) this.fuel = TUNE.jetFuelMax;
     const wants = this.wantJumpHeld && !this.grounded && this.fuel > 0;
     this.jetLit = wants;
 
     if (wants) {
-      this.fuel = Math.max(0, this.fuel - dt);
+      if (!this.god) this.fuel = Math.max(0, this.fuel - dt);
       this.jetGroundTimer = TUNE.jetRefillDelay;
 
       const gravity = Math.abs(this.game.physics.world.gravity.y);
@@ -685,7 +731,7 @@ export class Player implements Actor {
     const lean = clamp(this.wantMoveX * 0.16 + (this.grounded ? 0 : 0.08), -0.3, 0.3);
     r.setMotor("torso", -lean, TUNE.spineStiff, TUNE.spineDamp);
     // Head tracks the aim a little; looks alert without breaking the neck limits.
-    r.setMotor("head", clamp(wrapPi(armWorld - torsoRot) * 0.12, -0.5, 0.5), TUNE.neckStiff, TUNE.neckDamp);
+    r.setMotor("head", clamp(wrapPi(armWorld - torsoRot) * 0.1, -0.3, 0.3), TUNE.neckStiff, TUNE.neckDamp);
 
     // --- legs --------------------------------------------------------------
     const crouching = this.wantCrouch;

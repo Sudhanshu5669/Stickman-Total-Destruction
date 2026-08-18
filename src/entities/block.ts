@@ -141,6 +141,17 @@ export class Block implements Actor, PhysOwner {
    * shatter before the player has even moved.
    */
   private settle = 1.1;
+  /**
+   * Flash-frozen by the fridge round. A frozen block is brittle: any contact at all
+   * shatters it, regardless of what it is made of.
+   */
+  frozen = false;
+  /**
+   * Brief immunity right after freezing. Both parties to a contact are notified in
+   * the same dispatch pass, so without it the fridge's own touch would freeze the
+   * block *and* shatter it in one frame — you'd never see the ice.
+   */
+  private frozenGrace = 0;
 
   constructor(private readonly game: GameCtx, o: BlockOptions) {
     this.mat = MATERIALS[o.material];
@@ -172,6 +183,20 @@ export class Block implements Actor, PhysOwner {
     this.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
   }
 
+  /**
+   * Flash-freeze: the block keeps its shape and its health, but the next thing that
+   * touches it shatters it. Deliberately *not* a `disturb()` — freezing a wall in
+   * place should not also shake the building loose.
+   */
+  freeze() {
+    if (this.frozen || this.dead) return;
+    this.frozen = true;
+    this.frozenGrace = 0.12;
+    const p = this.pos;
+    this.game.particles.shards(p.x, p.y, 5, "#d6f2ff", 2.4);
+    this.game.particles.dust(p.x, p.y, 4, 1.6, "#e4f7ff");
+  }
+
   /** Frees every block near `at` — used when one of them is destroyed. */
   private disturbNeighbours(at_: V, radius: number) {
     for (const o of this.game.physics.ownersInRadius(at_, radius)) {
@@ -188,6 +213,12 @@ export class Block implements Actor, PhysOwner {
     if (this.dead || this.settle > 0) return;
     const m = this.mat;
     const kj = energy / 1000;
+    // Frozen: one touch, any touch. The impact filter upstream already drops contacts
+    // below ~2.2 m/s, so this can't be triggered by a block simply resting on another.
+    if (this.frozen && this.frozenGrace <= 0) {
+      this.takeDamage(this.hp + 1, point);
+      return;
+    }
     // Any real knock shakes a block loose, even one too weak to damage it. This is
     // what lets a collapse propagate upward through an otherwise static building.
     if (kj > 0.12) this.disturb();
@@ -224,13 +255,15 @@ export class Block implements Actor, PhysOwner {
     // Whatever this block was holding up is now on its own.
     this.disturbNeighbours(p, Math.max(this.w, this.h) * 0.75 + 1.4);
     const chunks = clamp(Math.round(area * 26) + 5, 6, 34);
-    this.game.particles.shards(p.x, p.y, chunks, this.mat.debris, 7 + area * 4);
-    this.game.particles.dust(p.x, p.y, clamp(Math.round(area * 12), 3, 16), 3.2, shade(this.mat.color, 0.35));
-    sfx.thud(0.85, this.mat.sound);
+    const debris = this.frozen ? "#d6f2ff" : this.mat.debris;
+    this.game.particles.shards(p.x, p.y, chunks, debris, 7 + area * 4);
+    this.game.particles.dust(p.x, p.y, clamp(Math.round(area * 12), 3, 16), 3.2,
+      this.frozen ? "#e4f7ff" : shade(this.mat.color, 0.35));
+    sfx.thud(0.85, this.frozen ? "glass" : this.mat.sound);
 
     // A couple of real rubble bodies per block: enough that the ground fills with
     // wreckage you can shoot again, without doubling the block count outright.
-    if (this.mat.id !== "glass" && this.mat.id !== "ice") {
+    if (!this.frozen && this.mat.id !== "glass" && this.mat.id !== "ice") {
       const vel = this.body.linvel();
       const n = clamp(Math.round(area * 4), 1, 4);
       for (let i = 0; i < n; i++) {
@@ -264,6 +297,7 @@ export class Block implements Actor, PhysOwner {
 
   update(_dt: number) {
     if (this.settle > 0) this.settle -= _dt;
+    if (this.frozenGrace > 0) this.frozenGrace -= _dt;
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - _dt * 2.6);
     // Anything that falls out of the world is gone for good.
     if (!this.anchored && this.body.translation().y < -80) this.dead = true;
@@ -340,12 +374,35 @@ export class Block implements Actor, PhysOwner {
       }
 
       if (dmgFrac > 0.18) this.drawCracks(ctx, dmgFrac);
+      if (this.frozen) this.drawFrost(ctx);
 
       if (this.hurtFlash > 0.02) {
         ctx.fillStyle = rgba("#ffffff", this.hurtFlash * 0.5);
         ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
       }
     });
+  }
+
+  /** Icy rime over a flash-frozen block, so "one touch kills this" is readable. */
+  private drawFrost(ctx: Ctx) {
+    ctx.fillStyle = rgba("#bfe9ff", 0.42);
+    ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+    ctx.strokeStyle = rgba("#ffffff", 0.55);
+    ctx.lineWidth = 0.035;
+    ctx.lineCap = "round";
+    const n = Math.max(2, Math.round(this.w * this.h * 5));
+    for (let i = 0; i < n; i++) {
+      const cx = (hash01(this.seed + i * 5.9) - 0.5) * this.w * 0.9;
+      const cy = (hash01(this.seed + i * 9.7) - 0.5) * this.h * 0.9;
+      const r = (0.06 + hash01(this.seed + i * 3.3) * 0.08) * Math.min(this.w + this.h, 1.6);
+      for (let k = 0; k < 3; k++) {
+        const a = (k / 3) * Math.PI + this.seed * 0.01;
+        ctx.beginPath();
+        ctx.moveTo(cx - Math.cos(a) * r, cy - Math.sin(a) * r);
+        ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+        ctx.stroke();
+      }
+    }
   }
 
   private drawBrickCourses(ctx: Ctx) {
@@ -476,6 +533,11 @@ export class Terrain implements Actor, PhysOwner {
     readonly w: number, readonly h: number,
     readonly color = "#3a4b3a",
     readonly topColor = "#5c8a43",
+    /**
+     * Skips the left and right edges of the outline. Endless mode lays the ground
+     * one slab per chunk, and a boxed outline puts a dark seam at every join.
+     */
+    readonly seamless = false,
   ) {
     const desc = RAPIER.RigidBodyDesc.fixed().setTranslation(x, y);
     this.body = game.physics.world.createRigidBody(desc);
@@ -504,7 +566,16 @@ export class Terrain implements Actor, PhysOwner {
     ctx.fillRect(x, y + this.h - 0.28, this.w, 0.28);
     ctx.strokeStyle = rgba("#000000", 0.3);
     ctx.lineWidth = 0.05;
-    ctx.strokeRect(x, y, this.w, this.h);
+    if (this.seamless) {
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + this.w, y);
+      ctx.moveTo(x, y + this.h);
+      ctx.lineTo(x + this.w, y + this.h);
+      ctx.stroke();
+    } else {
+      ctx.strokeRect(x, y, this.w, this.h);
+    }
 
     if (!this.game.theme.vegetation) return;
 

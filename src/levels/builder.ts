@@ -1,6 +1,6 @@
 import { Block, Terrain, type MaterialId } from "../entities/block";
-import { Enemy, type EnemyKind } from "../entities/enemy";
-import type { GameCtx } from "../core/types";
+import { Enemy, combat, type CombatOptions, type CombatSpec, type EnemyKind } from "../entities/enemy";
+import type { Actor, GameCtx } from "../core/types";
 import { chance, pick, rand } from "../core/math";
 import type { Theme } from "../render/theme";
 import { Decor } from "./hazards";
@@ -14,23 +14,61 @@ import { Decor } from "./hazards";
 export class Builder {
   readonly enemies: Enemy[] = [];
 
-  constructor(private readonly game: GameCtx, private readonly theme: Theme) {}
+  /**
+   * Every actor this builder has ever created, in creation order. Endless mode uses
+   * it to retire the chunks the player has already left behind — see `mark()`.
+   */
+  readonly spawned: Actor[] = [];
+
+  /**
+   * Combat behaviour applied to enemies that don't ask for their own. Campaign and
+   * endless levels set it once at the top of `build`, so every existing `b.enemy()`
+   * and every `guards:` list on a tower comes out armed without touching the call.
+   */
+  defaultCombat: CombatSpec | null = null;
+
+  constructor(private readonly game: GameCtx, readonly theme: Theme) {}
+
+  /** Index into `spawned`; pass a pair to `retire()` to delete a range. */
+  mark() {
+    return this.spawned.length;
+  }
+
+  /** Kills every actor created between two marks. Used to unload distant chunks. */
+  retire(from: number, to = this.spawned.length) {
+    for (let i = from; i < to && i < this.spawned.length; i++) this.spawned[i].dead = true;
+  }
+
+  private track<T extends Actor>(a: T): T {
+    this.spawned.push(a);
+    return a;
+  }
 
   ground(x: number, y: number, w: number, h = 6, color = this.theme.ground, top = this.theme.groundTop) {
-    return this.game.add(new Terrain(this.game, x, y, w, h, color, top));
+    return this.track(this.game.add(new Terrain(this.game, x, y, w, h, color, top)));
+  }
+
+  /**
+   * A ground slab meant to sit flush against its neighbours — no side outline, so a
+   * run of them reads as one continuous surface. Endless mode streams these.
+   */
+  groundRun(x: number, y: number, w: number, h = 6) {
+    return this.track(this.game.add(
+      new Terrain(this.game, x, y, w, h, this.theme.ground, this.theme.groundTop, true),
+    ));
   }
 
   /** Solid rock ledge — reads as terrain rather than something you can knock over. */
   ledge(x: number, y: number, w: number, h = 1.2) {
-    return this.game.add(new Terrain(this.game, x, y, w, h, this.theme.rock, this.theme.rockTop));
+    return this.track(this.game.add(new Terrain(this.game, x, y, w, h, this.theme.rock, this.theme.rockTop)));
   }
 
   decor(x: number, y: number, kind: "torch" | "banner" | "antenna" | "pod", tint?: string, z?: number) {
-    return this.game.add(new Decor(this.game, x, y, kind, tint, z));
+    return this.track(this.game.add(new Decor(this.game, x, y, kind, tint, z)));
   }
 
   block(x: number, y: number, w: number, h: number, material: MaterialId, angle = 0, anchored = true) {
-    return this.game.add(new Block(this.game, { x, y, w, h, material, angle, anchored }));
+    return this.track(this.game.add(new Block(this.game, { x, y, w, h, material, angle, anchored })));
   }
 
   /** A block that is free from the start — loose crates, barrels, rubble. */
@@ -38,10 +76,20 @@ export class Builder {
     return this.block(x, y, w, h, material, angle, false);
   }
 
-  enemy(kind: EnemyKind, x: number, y: number, facing: 1 | -1 = -1) {
-    const e = this.game.add(new Enemy(this.game, kind, x, y, facing));
+  /**
+   * @param arms Combat options for this one stickman. Omit to use `defaultCombat`,
+   *             pass `null` to leave it unarmed even on an armed level.
+   */
+  enemy(kind: EnemyKind, x: number, y: number, facing: 1 | -1 = -1, arms?: CombatOptions | null) {
+    const spec = arms === undefined ? this.defaultCombat : arms === null ? null : combat(arms);
+    const e = this.game.add(new Enemy(this.game, kind, x, y, facing, spec));
     this.enemies.push(e);
-    return e;
+    return this.track(e);
+  }
+
+  /** Shorthand for a stickman that definitely shoots back. */
+  gunner(kind: EnemyKind, x: number, y: number, facing: 1 | -1 = -1, arms: CombatOptions = {}) {
+    return this.enemy(kind, x, y, facing, arms);
   }
 
   /**

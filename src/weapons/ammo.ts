@@ -86,12 +86,17 @@ export const AMMO: AmmoDef[] = [
     name: "Sedan Slinger",
     tagline: "Pre-owned. Not for long.",
     tint: "#e04b3a",
-    count: 1, spread: 0.05, speed: 34, speedVar: 3, cooldown: 0.9,
+    count: 1, spread: 0.05, speed: 38, speedVar: 3, cooldown: 0.9,
     recoil: 15, heft: 0.9, auto: false, reserve: -1, muzzle: 2.6,
     spawn: makeRigid(rigid({
-      shape: "box", w: 4.2, h: 1.7, density: 175,
-      friction: 0.75, restitution: 0.1, angularDamping: 0.05,
-      explode: { radius: 5.4, force: 18, damage: 170, minEnergy: 70 },
+      // ~2.6 tonnes. At the old density it was lighter than the anvil, bounced off
+      // brick and skidded to a stop — a two-tonne sedan should not be a lawn dart.
+      shape: "box", w: 4.2, h: 1.7, density: 365,
+      friction: 0.45, restitution: 0.02, angularDamping: 0.03,
+      // Fires on the wreck rather than the first tap, so it ploughs through a wall
+      // before going up instead of detonating against the very first thing it grazes.
+      explode: { radius: 6.4, force: 26, damage: 300, minEnergy: 45 },
+      bonusDamage: 70,
       impactSound: "metal", draw: P.drawCar, points: 45,
     })),
   },
@@ -169,13 +174,14 @@ export const AMMO: AmmoDef[] = [
   {
     id: "fridge",
     name: "Cold Storage",
-    tagline: "Still humming when it lands.",
+    tagline: "Freezes whatever it touches. Then it only takes one more hit.",
     tint: "#dfe4ea",
     count: 1, spread: 0.05, speed: 33, speedVar: 3, cooldown: 0.55,
     recoil: 10, heft: 0.7, auto: true, reserve: -1, muzzle: 1.5,
     spawn: makeRigid(rigid({
       shape: "box", w: 0.95, h: 1.95, density: 195,
-      restitution: 0.08, impactSound: "metal", draw: P.drawFridge, points: 22,
+      restitution: 0.08, freeze: { radius: 1.9 },
+      impactSound: "glass", draw: P.drawFridge, points: 22,
     })),
   },
   {
@@ -219,18 +225,6 @@ export const AMMO: AmmoDef[] = [
     })),
   },
   {
-    id: "toilet",
-    name: "Porcelain Throne",
-    tagline: "Flushed with power.",
-    tint: "#f6f7f9",
-    count: 1, spread: 0.06, speed: 37, speedVar: 4, cooldown: 0.4,
-    recoil: 6, heft: 0.45, auto: true, reserve: -1, muzzle: 1.1,
-    spawn: makeRigid(rigid({
-      shape: "box", w: 1.0, h: 1.1, density: 185,
-      restitution: 0.1, impactSound: "glass", draw: P.drawToilet, points: 14,
-    })),
-  },
-  {
     id: "tv",
     name: "Static Discharge",
     tagline: "Nothing good was on anyway.",
@@ -257,25 +251,12 @@ export const AMMO: AmmoDef[] = [
     })),
   },
   {
-    id: "granny",
-    name: "Nana Nailgun",
-    tagline: "She has been waiting for this.",
-    tint: "#c8cdd6",
-    count: 1, spread: 0.08, speed: 35, speedVar: 4, cooldown: 0.6,
-    recoil: 9, heft: 0.6, auto: true, reserve: -1, muzzle: 1.3,
-    spawn: makeRigid(rigid({
-      shape: "box", w: 1.25, h: 1.25, density: 210,
-      restitution: 0.3, angularDamping: 0.03,
-      impactSound: "thud", draw: P.drawGrandmother, points: 35, bonusDamage: 20,
-    })),
-  },
-  {
     id: "nuke",
     name: "Tactical Regret",
-    tagline: "Three of them. Use them badly.",
+    tagline: "Unlimited. Use them badly.",
     tint: "#ffd23f",
     count: 1, spread: 0.02, speed: 33, speedVar: 0, cooldown: 4.5,
-    recoil: 26, heft: 1, auto: false, reserve: 3, muzzle: 1.6,
+    recoil: 26, heft: 1, auto: false, reserve: -1, muzzle: 1.6,
     spawn: makeRigid(rigid({
       shape: "box", w: 1.6, h: 0.62, density: 420,
       gravityScale: 0.62, steer: 3, trail: "smoke", trailColor: "#d6dbe4",

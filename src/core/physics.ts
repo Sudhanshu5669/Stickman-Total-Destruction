@@ -48,6 +48,11 @@ export interface PhysOwner {
    * themselves from static to dynamic so they can fall.
    */
   disturb?(): void;
+  /**
+   * Flash-freeze. Whatever implements this turns brittle: the next contact of any
+   * strength destroys it. Fired by the fridge round.
+   */
+  freeze?(): void;
 }
 
 export interface ImpactEvent {
@@ -188,6 +193,42 @@ export class Physics {
       undefined, exclude,
     );
     return hit ? hit.timeOfImpact : null;
+  }
+
+  /**
+   * General ray query. Returns the first collider hit along `dir`, with the world
+   * point and the gameplay object that owns it.
+   *
+   * `groups` is a packed interaction group — build it with `ig()`. Enemy fire uses
+   * this rather than a real projectile body: bullets are far too fast and far too
+   * numerous to be worth a rigid body each.
+   */
+  rayCast(
+    from: V, dir: V, maxDist: number, groups: number, exclude?: RAPIER.RigidBody,
+  ): { point: V; distance: number; owner: PhysOwner | null; body: RAPIER.RigidBody | null } | null {
+    const d = norm(dir);
+    if (d.x === 0 && d.y === 0) return null;
+    const ray = new RAPIER.Ray(from, d);
+    const hit = this.world.castRay(ray, maxDist, true, undefined, groups, undefined, exclude);
+    if (!hit) return null;
+    const t = hit.timeOfImpact;
+    const collider = hit.collider;
+    return {
+      point: v(from.x + d.x * t, from.y + d.y * t),
+      distance: t,
+      owner: this.owners.get(collider.handle) ?? null,
+      body: collider.parent(),
+    };
+  }
+
+  /** True when nothing solid sits between the two points. Used for enemy line-of-sight. */
+  lineOfSight(from: V, to: V, exclude?: RAPIER.RigidBody): boolean {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const d = Math.hypot(dx, dy);
+    if (d < 0.2) return true;
+    const hit = this.rayCast(from, v(dx / d, dy / d), d - 0.15, ig(G.SENSOR, G.TERRAIN | G.BLOCK), exclude);
+    return hit === null;
   }
 
   /** Every dynamic body whose origin sits within `radius` of `center`. */

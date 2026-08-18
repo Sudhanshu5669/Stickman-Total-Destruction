@@ -208,31 +208,6 @@ export const drawSawblade: PropDraw = (ctx, _w, h) => {
   disc(ctx, 0, 0, r * 0.1, "#2f3846", null);
 };
 
-export const drawToilet: PropDraw = (ctx, w, h) => {
-  // Tank.
-  roundBox(ctx, w * 0.42, h * 0.5, 0.05, "#f6f7f9", "#9aa3b0", 0.045);
-  ctx.save();
-  ctx.translate(-w * 0.28, h * 0.24);
-  ctx.restore();
-  // Bowl.
-  ctx.save();
-  ctx.translate(w * 0.14, -h * 0.18);
-  ctx.beginPath();
-  ctx.ellipse(0, 0, w * 0.34, h * 0.3, 0, 0, TAU);
-  ctx.fillStyle = "#f6f7f9";
-  ctx.fill();
-  ctx.strokeStyle = "#9aa3b0";
-  ctx.lineWidth = 0.045;
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.ellipse(0, h * 0.05, w * 0.22, h * 0.16, 0, 0, TAU);
-  ctx.fillStyle = "#8fd8e8";
-  ctx.fill();
-  ctx.restore();
-  ctx.fillStyle = "#dfe4ea";
-  ctx.fillRect(-w * 0.05, -h * 0.5, w * 0.3, h * 0.16);
-};
-
 export const drawTv: PropDraw = (ctx, w, h) => {
   roundBox(ctx, w, h, h * 0.1, "#2b303c", "#141820", 0.05);
   ctx.fillStyle = "#7fd0e8";
@@ -305,29 +280,10 @@ export const drawBarrel: PropDraw = (ctx, w, h) => {
   ctx.fill();
 };
 
-export const drawGrandmother: PropDraw = (ctx, w, h) => {
-  // Rocking chair granny — pure chaos, zero explanation offered.
-  poly(ctx, [
-    [-w * 0.5, -h * 0.5], [w * 0.5, -h * 0.5],
-    [w * 0.34, h * 0.12], [-w * 0.34, h * 0.12],
-  ], "#7b4a2d", "#43281a", 0.05);
-  disc(ctx, 0, h * 0.34, h * 0.2, "#f0c9a4", "#43281a", 0.04);
-  ctx.fillStyle = "#c8cdd6";
-  ctx.beginPath();
-  ctx.arc(0, h * 0.42, h * 0.19, Math.PI * 0.9, Math.PI * 2.1);
-  ctx.fill();
-  ctx.strokeStyle = "#43281a";
-  ctx.lineWidth = 0.04;
-  ctx.beginPath();
-  ctx.moveTo(-w * 0.5, -h * 0.5);
-  ctx.quadraticCurveTo(0, -h * 0.82, w * 0.5, -h * 0.5);
-  ctx.stroke();
-};
-
 /**
  * Rasterised ammo glyphs for the HUD.
  *
- * The wheel shows every round at once, and re-running nineteen full vector drawings
+ * The wheel shows every round at once, and re-running every full vector drawing
  * (cars, jetliners, grand pianos) on every frame cost more than the entire world
  * render. Each icon is baked once into a small offscreen canvas and blitted after.
  * The Y flip is baked in too, since the HUD draws in screen space.
@@ -401,12 +357,10 @@ export function drawIcon(ctx: Ctx, id: string, size: number, t: number) {
     case "bowling": drawBowling(ctx, 0.8, 0.8, t); break;
     case "watermelon": drawWatermelon(ctx, 0.8, 0.7, t); break;
     case "sawblade": drawSawblade(ctx, 0.9, 0.9, t); break;
-    case "toilet": drawToilet(ctx, 0.75, 0.8, t); break;
     case "tv": drawTv(ctx, 0.8, 0.6, t); break;
     case "nuke": drawNuke(ctx, 0.45, 0.9, t); break;
     case "blackhole": drawBlackhole(ctx, 0.9, 0.9, t); break;
     case "barrel": drawBarrel(ctx, 0.55, 0.85, t); break;
-    case "granny": drawGrandmother(ctx, 0.8, 0.7, t); break;
     default:
       polyPath(ctx, [[-0.4, -0.4], [0.4, -0.4], [0.4, 0.4], [-0.4, 0.4]]);
       ctx.fillStyle = "#888";

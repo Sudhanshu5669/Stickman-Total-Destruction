@@ -106,14 +106,6 @@ export class Input {
     return codes.some((c) => this.releasedKeys.has(c));
   }
 
-  /** Digit key 1-9 pressed this frame, or -1. Reads both the number row and the numpad. */
-  digitPressed(): number {
-    for (let i = 1; i <= 9; i++) {
-      if (this.pressed(`Digit${i}`, `Numpad${i}`)) return i;
-    }
-    return -1;
-  }
-
   /** -1 / 0 / +1 horizontal move axis. */
   get moveX() {
     return (this.held("KeyD", "ArrowRight") ? 1 : 0) - (this.held("KeyA", "ArrowLeft") ? 1 : 0);

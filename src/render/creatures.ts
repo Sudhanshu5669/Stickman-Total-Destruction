@@ -42,8 +42,11 @@ function limb(ctx: Ctx, b: Bone | undefined, color: string, weight: number) {
  * Stick-figure renderer driven straight off the simulated bones, so what you see is
  * exactly what the physics is doing — the flop is never faked.
  */
+/** Flash-frozen bodies are rendered in rime instead of their own colours. */
+const FROST: SkinStyle = { ink: "#9fd8f0", fill: "#d6f2ff", accent: "#ffffff", outline: "rgba(80,140,180,0.6)" };
+
 export function drawBiped(ctx: Ctx, r: Ragdoll, style: SkinStyle = DEFAULT) {
-  const s = { ...DEFAULT, ...style };
+  const s = { ...DEFAULT, ...style, ...(r.frozen ? FROST : {}) };
   const w = s.weight;
   const lite = r.has("armBack");
 

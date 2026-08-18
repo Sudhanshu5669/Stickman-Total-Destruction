@@ -103,6 +103,10 @@ export class Ragdoll implements PhysOwner {
   maxHp = 100;
   dead = false;
   limp = false;
+  /** Flash-frozen by the fridge round: goes limp and shatters on the next contact. */
+  frozen = false;
+  /** Cleared on the player — being one-shot by your own fridge is not a feature. */
+  freezable = true;
   /** Set when the ragdoll's own bodies have been removed from the world. */
   disposed = false;
 
@@ -287,8 +291,23 @@ export class Ragdoll implements PhysOwner {
     }
   }
 
+  /**
+   * Flash-freeze. The body locks up (limp, heavily damped) and turns brittle, so the
+   * next thing that touches it takes it apart. Mirrors `Block.freeze`.
+   */
+  freeze() {
+    if (this.frozen || !this.freezable || this.disposed) return;
+    this.frozen = true;
+    // Any contact the engine bothers to report (>2.2 m/s relative) is now lethal.
+    this.impactIgnore = 0;
+    this.impactFragility = 1e6;
+    this.splatColor = "#d6f2ff";
+    this.goLimp();
+  }
+
   /** Re-enables motor control after a limp period (used by the player's get-up). */
   stiffen() {
+    if (this.frozen) return;
     this.limp = false;
     for (const b of this.boneList) {
       b.body.setAngularDamping(0.55);

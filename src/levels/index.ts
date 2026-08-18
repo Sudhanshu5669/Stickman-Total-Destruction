@@ -2,11 +2,21 @@ import { SANDBOX } from "./sandbox";
 import { CASTLE } from "./castle";
 import { ALIEN } from "./alien";
 import { MARS } from "./mars";
+import { CAMPAIGN } from "./campaign";
+import { ENDLESS } from "./endless";
 import type { LevelDef } from "./types";
 
-/** Menu order. The sandbox stays first: it is the one that teaches the arsenal. */
-export const LEVELS: readonly LevelDef[] = [SANDBOX, CASTLE, ALIEN, MARS];
+/** Free-play worlds. The sandbox stays first: it is the one that teaches the arsenal. */
+export const PLAYGROUND: readonly LevelDef[] = [SANDBOX, CASTLE, ALIEN, MARS];
 
-export const levelById = (id: string): LevelDef => LEVELS.find((l) => l.id === id) ?? LEVELS[0];
+/** Kept for the attract mode and anything that just wants "a world to show". */
+export const LEVELS = PLAYGROUND;
 
-export type { LevelDef, LevelInfo } from "./types";
+export { CAMPAIGN, ENDLESS };
+
+/** Every level the game knows about, in every mode. */
+export const ALL_LEVELS: readonly LevelDef[] = [...PLAYGROUND, ...CAMPAIGN, ENDLESS];
+
+export const levelById = (id: string): LevelDef => ALL_LEVELS.find((l) => l.id === id) ?? PLAYGROUND[0];
+
+export type { LevelDef, LevelInfo, LevelKind } from "./types";

@@ -1,7 +1,6 @@
-import { AMMO } from "../weapons/ammo";
 import { iconBitmap } from "../render/props";
 import { clamp, damp, lerp, TAU } from "../core/math";
-import type { Ctx } from "../render/draw";
+import { rgba, type Ctx } from "../render/draw";
 import type { Weapon } from "../weapons/weapon";
 
 export interface HudState {
@@ -34,6 +33,19 @@ export interface HudState {
   /** 0..1, fades the intro control card out once the player starts playing. */
   hintAlpha: number;
   levelName: string;
+
+  // ------------------------------------------------------------- run mode
+  mode: "playground" | "campaign" | "endless";
+  /** Campaign: knockouts left before the mission fails. */
+  lives: number;
+  /** Campaign: the mission's one-line brief, shown while the intro card is up. */
+  briefing: string;
+  /** Endless: metres travelled from the start. */
+  distance: number;
+  /** Endless: best distance this session. */
+  bestDistance: number;
+  /** Endless: enemies killed this run. */
+  kills: number;
 }
 
 const INK = "#0e1017";
@@ -48,6 +60,13 @@ export class Hud {
   private ammoScroll = 0;
   private hurtPulse = 0;
   private lastHp = 1;
+  /**
+   * Weapon-banner animation. `swapPop` fires on every ammo change and decays; the
+   * banner lives at the top of the screen because the bottom of the frame is exactly
+   * where the ammo strip lifts over it mid-swap and eats the description.
+   */
+  private swapPop = 0;
+  private lastAmmoId = "";
 
   draw(ctx: Ctx, w: number, h: number, s: HudState, dt: number) {
     const scale = clamp(Math.min(w, h) / 780, 0.62, 1.35);
@@ -62,6 +81,7 @@ export class Hud {
 
     this.drawTopLeft(ctx, scale, s);
     this.drawTopRight(ctx, w, scale, s);
+    this.drawWeaponBanner(ctx, w, scale, s, dt);
     this.drawAmmoBar(ctx, w, h, scale, s, dt);
     this.drawCombo(ctx, w, h, scale, s);
     if (s.hintAlpha > 0.01) this.drawHints(ctx, w, h, scale, s);
@@ -126,35 +146,107 @@ export class Hud {
     text(ctx, "SCORE", x + 4 * k + ctx.measureText(s.displayScore.toLocaleString("en-US")).width, scoreY, 12 * k, "rgba(244,241,232,0.5)", "left", "alphabetic", 800);
   }
 
+  /** Mission readout. Each mode leads with the number that actually matters in it. */
   private drawTopRight(ctx: Ctx, w: number, k: number, s: HudState) {
     const x = w - 22 * k;
     const y = 22 * k;
-    panel(ctx, x - 210 * k, y - 8 * k, 218 * k, 62 * k, k);
+    // Campaign adds a level-name line and a row of life pips underneath.
+    panel(ctx, x - 210 * k, y - 8 * k, 218 * k, (s.mode === "campaign" ? 104 : 78) * k, k);
 
-    text(ctx, `${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, x - 10 * k, y + 20 * k, 24 * k, CREAM, "right", "alphabetic", 900, "rgba(0,0,0,0.6)");
-    text(ctx, "STICKMEN DOWN", x - 10 * k, y + 36 * k, 11 * k, "rgba(244,241,232,0.55)", "right", "alphabetic", 800);
-    text(ctx, `${s.blocksDestroyed} BLOCKS SMASHED`, x - 10 * k, y + 52 * k, 11 * k, "rgba(255,210,63,0.8)", "right", "alphabetic", 800);
+    if (s.mode === "endless") {
+      text(ctx, `${Math.floor(s.distance)}m`, x - 10 * k, y + 20 * k, 24 * k, CREAM, "right", "alphabetic", 900, "rgba(0,0,0,0.6)");
+      text(ctx, `BEST ${Math.floor(s.bestDistance)}m`, x - 10 * k, y + 36 * k, 11 * k, "rgba(244,241,232,0.55)", "right", "alphabetic", 800);
+      text(ctx, `${s.kills} DOWN · ${s.blocksDestroyed} SMASHED`, x - 10 * k, y + 52 * k, 11 * k, "rgba(255,210,63,0.8)", "right", "alphabetic", 800);
+    } else {
+      text(ctx, `${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, x - 10 * k, y + 20 * k, 24 * k, CREAM, "right", "alphabetic", 900, "rgba(0,0,0,0.6)");
+      text(ctx, s.mode === "campaign" ? "HOSTILES DOWN" : "STICKMEN DOWN", x - 10 * k, y + 36 * k, 11 * k, "rgba(244,241,232,0.55)", "right", "alphabetic", 800);
+      text(ctx, `${s.blocksDestroyed} BLOCKS SMASHED`, x - 10 * k, y + 52 * k, 11 * k, "rgba(255,210,63,0.8)", "right", "alphabetic", 800);
+    }
     text(ctx, s.levelName.toUpperCase(), x - 10 * k, y + 70 * k, 10 * k, "rgba(244,241,232,0.35)", "right", "alphabetic", 800);
+
+    // Lives, as pips under the readout. Campaign only — nothing else can be failed.
+    if (s.mode === "campaign") {
+      const r = 5 * k;
+      for (let i = 0; i < 5; i++) {
+        const px = x - 10 * k - i * (r * 2.8);
+        ctx.fillStyle = i < s.lives ? "#e8433a" : "rgba(255,255,255,0.14)";
+        ctx.beginPath();
+        ctx.arc(px, y + 84 * k, r, 0, TAU);
+        ctx.fill();
+      }
+      text(ctx, "LIVES", x - 10 * k - 5 * (r * 2.8) - 8 * k, y + 87 * k, 10 * k, "rgba(244,241,232,0.45)", "right", "alphabetic", 800);
+    }
+  }
+
+  /**
+   * The weapon card, pinned to the top-centre of the screen.
+   *
+   * Sits above the action rather than under it: the ammo strip at the bottom scales
+   * its selected cell up during a swap, which used to cover the name and tagline for
+   * exactly the second you most want to read them.
+   */
+  private drawWeaponBanner(ctx: Ctx, w: number, k: number, s: HudState, dt: number) {
+    const a = s.weapon.ammo;
+    if (a.id !== this.lastAmmoId) {
+      this.lastAmmoId = a.id;
+      this.swapPop = 1;
+    }
+    this.swapPop = Math.max(0, this.swapPop - dt * 1.6);
+
+    const pop = this.swapPop;
+    const cx = w / 2;
+    const y = 20 * k;
+    const bw = 320 * k;
+    const bh = 62 * k;
+    const x = cx - bw / 2;
+
+    ctx.save();
+    // A gentle drop-in on swap, so the change is legible without being a cutscene.
+    ctx.translate(cx, y);
+    const scale = 1 + pop * pop * 0.06;
+    ctx.scale(scale, scale);
+    ctx.translate(-cx, -y - pop * pop * 6 * k);
+
+    ctx.fillStyle = `rgba(14,16,23,${0.5 + pop * 0.3})`;
+    roundRect(ctx, x, y, bw, bh, 10 * k);
+    ctx.fill();
+    ctx.strokeStyle = pop > 0.02 ? rgba(a.tint, 0.35 + pop * 0.65) : "rgba(255,255,255,0.1)";
+    ctx.lineWidth = (1 + pop * 2) * k;
+    ctx.stroke();
+
+    // Accent bar in the round's own colour, so the card is identifiable at a glance.
+    ctx.fillStyle = a.tint;
+    roundRect(ctx, x + 6 * k, y + 10 * k, 4 * k, bh - 20 * k, 2 * k);
+    ctx.fill();
+
+    const glyph = iconBitmap(a.id);
+    const gs = 34 * k;
+    ctx.drawImage(glyph, x + 16 * k, y + bh / 2 - gs / 2, gs, gs);
+
+    const tx = x + 60 * k;
+    text(ctx, a.name.toUpperCase(), tx, y + 26 * k, 18 * k, CREAM, "left", "middle", 900, "rgba(0,0,0,0.6)");
+    text(ctx, a.tagline, tx, y + 44 * k, 12 * k, "rgba(244,241,232,0.62)", "left", "middle", 700);
+
+    const rounds = s.weapon.rounds();
+    if (rounds !== Infinity) {
+      text(ctx, `${rounds}`, x + bw - 14 * k, y + 28 * k, 20 * k, rounds > 0 ? GOLD : "#e8433a", "right", "middle", 900);
+      text(ctx, "LEFT", x + bw - 14 * k, y + 44 * k, 9 * k, "rgba(244,241,232,0.45)", "right", "middle", 800);
+    } else {
+      text(ctx, "∞", x + bw - 14 * k, y + 30 * k, 22 * k, "rgba(244,241,232,0.45)", "right", "middle", 900);
+    }
+    ctx.restore();
   }
 
   /** Bottom strip: every round, current one lifted and lit. */
   private drawAmmoBar(ctx: Ctx, w: number, h: number, k: number, s: HudState, dt: number) {
+    const list = s.weapon.list;
     const cell = 58 * k;
     const gap = 8 * k;
-    const n = AMMO.length;
+    const n = list.length;
     const cx = w / 2;
     const baseY = h - 74 * k;
 
     this.ammoScroll = damp(this.ammoScroll, s.weapon.index, 14, dt);
-
-    const a = s.weapon.ammo;
-    text(ctx, a.name.toUpperCase(), cx, h - 128 * k, 22 * k, CREAM, "center", "alphabetic", 900, "rgba(0,0,0,0.65)");
-    text(ctx, a.tagline, cx, h - 110 * k, 12 * k, "rgba(244,241,232,0.6)", "center", "alphabetic", 700);
-
-    const rounds = s.weapon.rounds();
-    if (rounds !== Infinity) {
-      text(ctx, `${rounds} LEFT`, cx, h - 146 * k, 13 * k, rounds > 0 ? GOLD : "#e8433a", "center", "alphabetic", 900, "rgba(0,0,0,0.65)");
-    }
 
     for (let i = 0; i < n; i++) {
       const offset = i - this.ammoScroll;
@@ -164,7 +256,7 @@ export class Hud {
       const sel = 1 - clamp(Math.abs(offset), 0, 1);
       const size = cell * (0.72 + sel * 0.42);
       const py = baseY - sel * 12 * k;
-      const def = AMMO[i];
+      const def = list[i];
 
       ctx.save();
       ctx.globalAlpha = 0.35 + sel * 0.65;
@@ -190,11 +282,13 @@ export class Hud {
         }
       }
       ctx.restore();
-
-      if (i < 9) {
-        text(ctx, `${i + 1}`, px, py + size / 2 + 13 * k, 10 * k, "rgba(244,241,232,0.45)", "center", "alphabetic", 800);
-      }
     }
+
+    // The cells are no longer numbered, so the strip has to say how to walk it.
+    const edge = cell * 0.57 + 18 * k;
+    const key = "rgba(244,241,232,0.5)";
+    text(ctx, "1 ‹", cx - edge, baseY + 5 * k, 15 * k, key, "right", "middle", 900);
+    text(ctx, "› 3", cx + edge, baseY + 5 * k, 15 * k, key, "left", "middle", 900);
   }
 
   private drawCombo(ctx: Ctx, w: number, h: number, k: number, s: HudState) {
@@ -225,9 +319,9 @@ export class Hud {
       ["SPACE", "jump · hold to fly"],
       ["MOUSE", "aim"],
       ["CLICK", "fire"],
-      ["1-9 / Q E / WHEEL", "swap ammo"],
+      ["1 / 3 · Q E · WHEEL", "swap ammo"],
       ["R", "go limp"],
-      ["G", "god mode"],
+      ...(s.mode === "campaign" ? [] : [["G", "god mode"]]),
       ["F", "restart"],
       ["ESC", "pause / menu"],
     ];
@@ -237,6 +331,9 @@ export class Hud {
     const y = h / 2 - bh / 2 - 40 * k;
     panel(ctx, x, y, bw, bh, k, 0.72);
     text(ctx, "CONTROLS", x + bw / 2, y + 26 * k, 15 * k, GOLD, "center", "alphabetic", 900);
+    if (s.briefing) {
+      text(ctx, s.briefing, w / 2, y - 18 * k, 15 * k, CREAM, "center", "alphabetic", 800, "rgba(0,0,0,0.7)");
+    }
     lines.forEach((l, i) => {
       const ly = y + 50 * k + i * 22 * k;
       text(ctx, l[0], x + 16 * k, ly, 13 * k, CREAM, "left", "alphabetic", 900);

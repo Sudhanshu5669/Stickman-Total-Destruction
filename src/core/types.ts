@@ -26,6 +26,21 @@ export interface Actor {
 }
 
 /**
+ * What the enemy AI is allowed to know about the player. Deliberately tiny so
+ * `entities/enemy` never has to import `Player` (which would be a cycle).
+ */
+export interface TargetRef {
+  /** Chest height, i.e. what an enemy actually aims at. */
+  aimPos: V;
+  pos: V;
+  alive: boolean;
+  /** True while the player is knocked down — enemies ease off rather than execute. */
+  down: boolean;
+  hurt(amount: number, point: V): void;
+  shove(imp: V): void;
+}
+
+/**
  * The slice of the game the entities are allowed to touch. Keeping it an interface
  * means entity modules never import `Game`, which would be a cycle.
  */
@@ -58,4 +73,9 @@ export interface GameCtx {
    * use for the rest of the world. Also used by attract-mode AI to find targets.
    */
   damageables(): readonly Actor[];
+  /**
+   * The player, for AI purposes. Null in attract mode and while the player is
+   * being rebuilt, so every caller must handle the absence.
+   */
+  target(): TargetRef | null;
 }

@@ -1,6 +1,6 @@
 import type { GameCtx } from "../core/types";
 import { clamp, norm, rand, v, type V } from "../core/math";
-import { AMMO, speedFor, type AmmoDef } from "./ammo";
+import { AMMO, AMMO_BY_ID, speedFor, type AmmoDef } from "./ammo";
 import { jitterDir, muzzleSpawn } from "../entities/projectile";
 import { at, disc, poly, rgba, roundBox, shade, type Ctx } from "../render/draw";
 import { drawIcon } from "../render/props";
@@ -19,6 +19,12 @@ export interface FireResult {
  */
 export class Weapon {
   index = 0;
+  /**
+   * The rounds this run actually issued, in HUD order. Defaults to everything;
+   * campaign missions cut it down to the handful the mission is built around.
+   * All selection, cycling and the HUD strip index into *this*, not `AMMO`.
+   */
+  list: readonly AmmoDef[] = AMMO;
   private cooldown = 0;
   /** Visual kick, decays fast; also drives the muzzle flash. */
   kick = 0;
@@ -32,7 +38,21 @@ export class Weapon {
   }
 
   get ammo(): AmmoDef {
-    return AMMO[this.index];
+    return this.list[this.index] ?? this.list[0];
+  }
+
+  /**
+   * Issues a loadout. `ids` are matched against the arsenal in the order given, so a
+   * mission controls both *what* you carry and which key each round sits on. Unknown
+   * ids are skipped; an empty result falls back to the full arsenal rather than
+   * leaving the player with no gun at all.
+   */
+  setLoadout(ids: readonly string[] | null | undefined) {
+    const picked = ids?.map((id) => AMMO_BY_ID.get(id)).filter((a): a is AmmoDef => !!a) ?? [];
+    this.list = picked.length ? picked : AMMO;
+    this.index = 0;
+    this.cooldown = 0;
+    this.refillAll();
   }
 
   get cooldownFrac() {
@@ -40,7 +60,8 @@ export class Weapon {
   }
 
   rounds(id = this.ammo.id): number {
-    const a = AMMO.find((x) => x.id === id)!;
+    const a = AMMO_BY_ID.get(id);
+    if (!a) return 0;
     return a.reserve < 0 ? Infinity : this.reserves.get(id) ?? 0;
   }
 
@@ -49,7 +70,7 @@ export class Weapon {
   }
 
   select(i: number) {
-    const n = ((i % AMMO.length) + AMMO.length) % AMMO.length;
+    const n = ((i % this.list.length) + this.list.length) % this.list.length;
     if (n === this.index) return;
     this.index = n;
     this.cooldown = Math.min(this.cooldown, 0.18);
