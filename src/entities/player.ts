@@ -132,6 +132,8 @@ export class Player implements Actor {
   private graceLeft = TUNE.spawnGrace;
   private sinceHurt = 99;
   private manualRagdoll = false;
+  /** Cheat: no damage, no death, no falling out of the world. Survives respawns. */
+  god = false;
   /** Rises while airborne after a big recoil shot, purely for the camera to react to. */
   launchBoost = 0;
 
@@ -328,6 +330,17 @@ export class Player implements Actor {
     sfx.ui(!this.manualRagdoll);
   }
 
+  setGod(on: boolean) {
+    this.god = on;
+    const r = this.ragdoll;
+    if (on) {
+      r.invulnerable = true;
+      r.hp = r.maxHp;
+    } else if (this.graceLeft <= 0) {
+      r.invulnerable = false;
+    }
+  }
+
   respawn(at?: V) {
     const p = at ?? this.spawn;
     this.ragdoll.destroy();
@@ -343,7 +356,8 @@ export class Player implements Actor {
     const r = this.ragdoll;
     this.sinceHurt += dt;
     this.graceLeft = Math.max(0, this.graceLeft - dt);
-    if (this.graceLeft <= 0) r.invulnerable = false;
+    if (this.graceLeft <= 0) r.invulnerable = this.god;
+    if (this.god && r.hp < r.maxHp) r.hp = r.maxHp;
     this.launchBoost = Math.max(0, this.launchBoost - dt * 1.6);
 
     if (r.dead) {
@@ -383,8 +397,9 @@ export class Player implements Actor {
     sfx.jetpack(this.jetThrottle);
 
     if (this.pos.y < -45) {
-      // Fell off the world.
-      r.takeDamage(9999);
+      // Fell off the world. In god mode that is a free ride back to spawn.
+      if (this.god) this.respawn();
+      else r.takeDamage(9999);
     }
   }
 

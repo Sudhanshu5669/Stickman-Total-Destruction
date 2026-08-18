@@ -123,7 +123,7 @@ export const AMMO: AmmoDef[] = [
       spec: QUADRUPED, scale: 2.3, massScale: 1.5, flail: 0.75, hp: 420,
       voice: () => sfx.trumpet(), voiceInterval: 1.6,
       splatColor: "#b03a4a", points: 90, bonusDamage: 45,
-      draw: (ctx, r) => drawQuadruped(ctx, r, { body: "#8d8f99", dark: "#767884", kind: "elephant" }),
+      draw: (ctx, r) => drawQuadruped(ctx, r, { body: "#8d8f99", dark: "#767884" }),
     }),
   },
   {
@@ -203,21 +203,6 @@ export const AMMO: AmmoDef[] = [
       restitution: 0.16, splat: { color: "#e0455c", count: 22 },
       impactSound: "splat", draw: P.drawWatermelon, points: 10, life: 14,
     })),
-  },
-  {
-    id: "cow",
-    name: "Livestock Launcher",
-    tagline: "Moo. Terminal moo.",
-    tint: "#f2f2f2",
-    count: 1, spread: 0.05, speed: 33, speedVar: 3, cooldown: 0.9,
-    recoil: 18, heft: 0.85, auto: false, reserve: -1, muzzle: 2.0,
-    onFire: () => sfx.moo(),
-    spawn: makeCreature({
-      spec: QUADRUPED, scale: 1.28, massScale: 1.0, flail: 1.1, hp: 190,
-      voice: () => sfx.moo(), voiceInterval: 1.3,
-      splatColor: "#c0263a", points: 45, bonusDamage: 22,
-      draw: (ctx, r) => drawQuadruped(ctx, r, { body: "#f2f2f2", dark: "#d9d9d9", kind: "cow" }),
-    }),
   },
   {
     id: "sawblade",

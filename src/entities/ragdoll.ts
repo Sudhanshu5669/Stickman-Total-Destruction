@@ -530,7 +530,7 @@ export const BIPED_LITE: RagdollSpec = {
   ],
 };
 
-/** Shared chassis for the elephant and cow rounds — scaled and re-skinned per animal. */
+/** Chassis for the elephant round. */
 export const QUADRUPED: RagdollSpec = {
   name: "quadruped",
   height: 1.6,

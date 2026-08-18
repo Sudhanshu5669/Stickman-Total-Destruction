@@ -128,11 +128,11 @@ function drawHead(ctx: Ctx, r: Ragdoll, s: Required<SkinStyle>) {
   });
 }
 
-/** Elephant / cow. Same skeleton, different silhouette details. */
+/** Elephant. */
 export function drawQuadruped(
   ctx: Ctx,
   r: Ragdoll,
-  opts: { body: string; dark: string; kind: "elephant" | "cow" },
+  opts: { body: string; dark: string },
 ) {
   const legs = ["legBL", "legBR", "legFL", "legFR"];
   for (const n of legs.slice(0, 2)) limb(ctx, r.bones.get(n), opts.dark, 1);
@@ -150,20 +150,10 @@ export function drawQuadruped(
       ctx.lineWidth = 0.05;
       ctx.stroke();
 
-      if (opts.kind === "cow") {
-        // Irregular blotches, deterministic per position so they don't crawl.
-        ctx.fillStyle = "#22242b";
-        for (const [bx, by, br] of [[-0.35, 0.12, 0.26], [0.3, -0.15, 0.2], [0.0, 0.25, 0.16]] as const) {
-          ctx.beginPath();
-          ctx.ellipse(bx * body.hw * 2, by * body.hh * 2, br * body.hw, br * body.hh * 1.3, 0.4, 0, TAU);
-          ctx.fill();
-        }
-      } else {
-        ctx.fillStyle = rgba("#000000", 0.12);
-        ctx.beginPath();
-        ctx.ellipse(-body.hw * 0.5, 0, body.hw * 0.42, body.hh * 0.75, 0, 0, TAU);
-        ctx.fill();
-      }
+      ctx.fillStyle = rgba("#000000", 0.12);
+      ctx.beginPath();
+      ctx.ellipse(-body.hw * 0.5, 0, body.hw * 0.42, body.hh * 0.75, 0, 0, TAU);
+      ctx.fill();
     });
   }
 
@@ -181,39 +171,23 @@ export function drawQuadruped(
       ctx.lineWidth = 0.05;
       ctx.stroke();
 
-      if (opts.kind === "elephant") {
-        // Ear: a big flapping fan is the whole read at a glance.
-        ctx.fillStyle = shade(opts.body, -0.12);
+      // Ear: a big flapping fan is the whole read at a glance.
+      ctx.fillStyle = shade(opts.body, -0.12);
+      ctx.beginPath();
+      ctx.ellipse(-head.hw * 0.45, head.hh * 0.1, head.hw * 0.72, head.hh * 0.95, -0.25, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = rgba("#000000", 0.25);
+      ctx.lineWidth = 0.04;
+      ctx.stroke();
+      // Tusks.
+      ctx.strokeStyle = "#f4efe2";
+      ctx.lineWidth = head.hw * 0.16;
+      ctx.lineCap = "round";
+      for (const sy of [-1, 1]) {
         ctx.beginPath();
-        ctx.ellipse(-head.hw * 0.45, head.hh * 0.1, head.hw * 0.72, head.hh * 0.95, -0.25, 0, TAU);
-        ctx.fill();
-        ctx.strokeStyle = rgba("#000000", 0.25);
-        ctx.lineWidth = 0.04;
+        ctx.moveTo(head.hw * 0.5, -head.hh * 0.15 + sy * head.hh * 0.16);
+        ctx.lineTo(head.hw * 1.05, -head.hh * 0.55 + sy * head.hh * 0.12);
         ctx.stroke();
-        // Tusks.
-        ctx.strokeStyle = "#f4efe2";
-        ctx.lineWidth = head.hw * 0.16;
-        ctx.lineCap = "round";
-        for (const sy of [-1, 1]) {
-          ctx.beginPath();
-          ctx.moveTo(head.hw * 0.5, -head.hh * 0.15 + sy * head.hh * 0.16);
-          ctx.lineTo(head.hw * 1.05, -head.hh * 0.55 + sy * head.hh * 0.12);
-          ctx.stroke();
-        }
-      } else {
-        ctx.strokeStyle = "#e8e2d2";
-        ctx.lineWidth = head.hw * 0.14;
-        ctx.lineCap = "round";
-        for (const sy of [-1, 1]) {
-          ctx.beginPath();
-          ctx.moveTo(head.hw * 0.1, head.hh * 0.5 * sy);
-          ctx.lineTo(head.hw * 0.55, head.hh * (0.55 + 0.5) * sy);
-          ctx.stroke();
-        }
-        ctx.fillStyle = "#f0b8bf";
-        ctx.beginPath();
-        ctx.ellipse(head.hw * 0.72, -head.hh * 0.1, head.hw * 0.3, head.hh * 0.34, 0, 0, TAU);
-        ctx.fill();
       }
 
       ctx.fillStyle = "#fff";

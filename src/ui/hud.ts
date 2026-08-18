@@ -24,6 +24,8 @@ export interface HudState {
   respawnIn: number;
   time: number;
   fps: number;
+  /** God mode on — the health bar becomes an invincibility badge. */
+  god: boolean;
   showDebug: boolean;
   bodies: number;
   particles: number;
@@ -54,7 +56,7 @@ export class Hud {
     this.lastHp = s.hp;
     this.hurtPulse = Math.max(0, this.hurtPulse - dt * 2.2);
 
-    if (this.hurtPulse > 0.01 || s.hp < s.maxHp * 0.3) {
+    if (!s.god && (this.hurtPulse > 0.01 || s.hp < s.maxHp * 0.3)) {
       this.drawDamageVignette(ctx, w, h, s);
     }
 
@@ -93,13 +95,16 @@ export class Hud {
     ctx.fillStyle = "rgba(0,0,0,0.45)";
     roundRect(ctx, x, y, bw, bh, 6 * k);
     ctx.fill();
-    const f = clamp(s.hp / s.maxHp, 0, 1);
-    ctx.fillStyle = f > 0.5 ? "#6ddc7a" : f > 0.25 ? GOLD : "#e8433a";
+    const f = s.god ? 1 : clamp(s.hp / s.maxHp, 0, 1);
+    // God mode pulses so it never reads as an ordinary full health bar.
+    ctx.fillStyle = s.god
+      ? `rgba(255,${200 + Math.round(Math.sin(s.time * 4) * 25)},63,1)`
+      : f > 0.5 ? "#6ddc7a" : f > 0.25 ? GOLD : "#e8433a";
     roundRect(ctx, x + 2 * k, y + 2 * k, (bw - 4 * k) * f, bh - 4 * k, 5 * k);
     ctx.fill();
 
-    text(ctx, `${Math.ceil(s.hp)}`, x + 10 * k, y + bh / 2, 14 * k, INK, "left", "middle", 900);
-    text(ctx, "HP", x + bw - 10 * k, y + bh / 2, 12 * k, "rgba(0,0,0,0.5)", "right", "middle", 900);
+    text(ctx, s.god ? "∞" : `${Math.ceil(s.hp)}`, x + 10 * k, y + bh / 2, 14 * k, INK, "left", "middle", 900);
+    text(ctx, s.god ? "GOD MODE" : "HP", x + bw - 10 * k, y + bh / 2, 12 * k, "rgba(0,0,0,0.5)", "right", "middle", 900);
 
     // Jetpack fuel, directly under health so the two read as one status block.
     const fy = y + bh + 5 * k;
@@ -222,6 +227,7 @@ export class Hud {
       ["CLICK", "fire"],
       ["1-9 / Q E / WHEEL", "swap ammo"],
       ["R", "go limp"],
+      ["G", "god mode"],
       ["F", "restart"],
       ["ESC", "pause / menu"],
     ];

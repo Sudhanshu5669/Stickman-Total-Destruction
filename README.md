@@ -36,6 +36,7 @@ the same character and physics you're about to control.
 | `1`–`9`, `Q` / `E`, wheel | Switch ammo |
 | `S` | Crouch |
 | `R` | Go limp (toggle full ragdoll) |
+| `G` | God mode (toggle invincibility) |
 | `F` | Restart the level |
 | `Esc` / `P` | Pause — Resume / Restart / Main Menu |
 | `M` | Mute |
@@ -55,12 +56,12 @@ uncontrollable on the other. It cuts out while you are knocked down.
 
 ## The arsenal
 
-19 rounds, all defined as data in `src/weapons/ammo.ts`:
+18 rounds, all defined as data in `src/weapons/ammo.ts`:
 
 Chicken Cannon · Rocket Launcher · Sedan Slinger · Jetliner Blaster · Elephant Gun ·
 Human Resources (fires screaming ragdolls) · Anvil Express · Grand Finale (a piano, which
 plays a chord when it lands) · Cold Storage · Perfect Game (bowling ball) · Melon Repeater ·
-Livestock Launcher · Buzzsaw Barrage · Porcelain Throne · Static Discharge · Barrel Roll ·
+Buzzsaw Barrage · Porcelain Throne · Static Discharge · Barrel Roll ·
 Nana Nailgun · Tactical Regret (a nuke, 3 rounds) · Singularity (a black hole, 3 rounds)
 
 Adding a new one is a single object literal — no new classes:
@@ -109,7 +110,7 @@ self-contained JS file with zero extra network requests.
 **Ragdolls** (`entities/ragdoll.ts`) are data-driven skeletons: a list of bones with
 positions, sizes and revolute joints with angle limits. Four skeletons ship — full biped
 (13 bodies, for the player and bosses), lite biped (7 bodies, for crowds and stickman
-ammo), quadruped (elephants and cows) and chicken.
+ammo), quadruped (elephants) and chicken.
 
 Three non-obvious things make the ragdolls behave, and all three are load-bearing:
 
@@ -147,7 +148,7 @@ failure propagates.
 Impact damage is computed from relative approach speed and reduced mass, in kilojoules.
 Material constants live in one table in `entities/block.ts`.
 
-**Audio** is synthesised at runtime — no audio files at all. Clucks, moos, elephant
+**Audio** is synthesised at runtime — no audio files at all. Clucks, elephant
 trumpets, explosions and the piano chord are all oscillators and filtered noise
 (`fx/audio.ts`).
 

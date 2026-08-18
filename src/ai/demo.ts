@@ -6,7 +6,7 @@ import type { GameCtx } from "../core/types";
 /** Rounds the demo favours — spectacular and readable at a glance. */
 const SHOWCASE = [
   "chicken", "rocket", "car", "elephant", "stickman", "piano",
-  "cow", "sawblade", "watermelon", "barrel", "anvil", "plane",
+  "sawblade", "watermelon", "barrel", "anvil", "plane",
 ];
 
 /**

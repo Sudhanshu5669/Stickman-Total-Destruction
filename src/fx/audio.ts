@@ -191,14 +191,6 @@ export class Sfx {
     }, 70);
   }
 
-  moo() {
-    if (!this.budget()) return;
-    this.tone({
-      freq: rand(150, 190), to: rand(95, 125), dur: 0.75, gain: 0.24, type: "sawtooth",
-      vibrato: { rate: 7, depth: 9 },
-    });
-  }
-
   trumpet() {
     if (!this.budget(2)) return;
     this.tone({

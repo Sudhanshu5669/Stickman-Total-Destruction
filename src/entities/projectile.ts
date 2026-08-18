@@ -345,7 +345,7 @@ export interface CreatureConfig {
 }
 
 /**
- * Ammo that is itself a ragdoll: chickens, cows, elephants and screaming stickmen.
+ * Ammo that is itself a ragdoll: chickens, elephants and screaming stickmen.
  * They tumble, flail and die on impact just like every other body in the world.
  */
 export class CreatureProjectile implements Actor {

@@ -400,12 +400,6 @@ export function drawIcon(ctx: Ctx, id: string, size: number, t: number) {
     case "fridge": drawFridge(ctx, 0.5, 0.9, t); break;
     case "bowling": drawBowling(ctx, 0.8, 0.8, t); break;
     case "watermelon": drawWatermelon(ctx, 0.8, 0.7, t); break;
-    case "cow":
-      disc(ctx, -0.08, 0, 0.32, "#f2f2f2", "#0004", 0.05);
-      ctx.fillStyle = "#22242b";
-      ctx.beginPath(); ctx.ellipse(-0.16, 0.06, 0.13, 0.1, 0.4, 0, TAU); ctx.fill();
-      disc(ctx, 0.28, 0.1, 0.18, "#f2f2f2", "#0004", 0.05);
-      break;
     case "sawblade": drawSawblade(ctx, 0.9, 0.9, t); break;
     case "toilet": drawToilet(ctx, 0.75, 0.8, t); break;
     case "tv": drawTv(ctx, 0.8, 0.6, t); break;

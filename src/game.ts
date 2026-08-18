@@ -78,6 +78,8 @@ export class Game implements GameCtx {
 
   paused = false;
   showDebug = false;
+  /** Session-level cheat: kept across respawns, restarts and level changes. */
+  private godMode = false;
   private hintAlpha = 1;
   private running = false;
 
@@ -122,6 +124,7 @@ export class Game implements GameCtx {
 
     this.player = this.add(new Player(this, this.input, this.level.spawn.x, this.level.spawn.y));
     this.flushPending();
+    this.player.setGod(this.godMode);
 
     if (def.hazard) {
       this.add(def.hazard(this));
@@ -512,11 +515,26 @@ export class Game implements GameCtx {
     }
   }
 
+  /** Invincibility cheat. Announces itself over the player so the state is never a mystery. */
+  private toggleGod() {
+    this.godMode = !this.godMode;
+    this.player.setGod(this.godMode);
+    const c = this.player.pos;
+    this.particles.popup(
+      c.x, c.y + 2.2,
+      this.godMode ? "GOD MODE ON" : "GOD MODE OFF",
+      this.godMode ? "#ffd23f" : "#f4f1e8",
+      0.85,
+    );
+    sfx.ui(this.godMode);
+  }
+
   /** Runs inside the fixed step, so these edges are consumed exactly once. */
   private handleSimKeys() {
     if (this.input.pressed("KeyM")) sfx.toggleMute();
     if (this.input.pressed("F3", "Backquote")) this.showDebug = !this.showDebug;
     if (this.input.pressed("KeyR")) this.player.toggleRagdoll();
+    if (this.input.pressed("KeyG")) this.toggleGod();
     // Reset last: it replaces `this.player`, so nothing after it may touch the old one.
     if (this.input.pressed("KeyF")) this.restart();
   }
@@ -615,6 +633,7 @@ export class Game implements GameCtx {
       respawnIn: this.player.respawnIn,
       time: this.time,
       fps: this.fps,
+      god: this.godMode,
       showDebug: this.showDebug,
       bodies: this.physics.bodyCount,
       particles: this.particles.active,
