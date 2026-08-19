@@ -146,35 +146,63 @@ export class Hud {
     text(ctx, "SCORE", x + 4 * k + ctx.measureText(s.displayScore.toLocaleString("en-US")).width, scoreY, 12 * k, "rgba(244,241,232,0.5)", "left", "alphabetic", 800);
   }
 
-  /** Mission readout. Each mode leads with the number that actually matters in it. */
+  /**
+   * Mission readout. Each mode leads with the number that actually matters in it.
+   *
+   * The panel is measured from its own contents rather than assuming a width. Level
+   * names, mode labels and the pip row all vary in length, and a fixed box either
+   * clipped the longest of them or left a slab of empty panel next to the shortest.
+   */
   private drawTopRight(ctx: Ctx, w: number, k: number, s: HudState) {
-    const x = w - 22 * k;
+    const right = w - 14 * k;
     const y = 22 * k;
-    // Campaign adds a level-name line and a row of life pips underneath.
-    panel(ctx, x - 210 * k, y - 8 * k, 218 * k, (s.mode === "campaign" ? 104 : 78) * k, k);
+    const pad = 14 * k;
+    const rowGap = 16 * k;
 
+    // Each row: text, size, weight, colour, outline.
+    const rows: [string, number, number, string, string?][] = [];
     if (s.mode === "endless") {
-      text(ctx, `${Math.floor(s.distance)}m`, x - 10 * k, y + 20 * k, 24 * k, CREAM, "right", "alphabetic", 900, "rgba(0,0,0,0.6)");
-      text(ctx, `BEST ${Math.floor(s.bestDistance)}m`, x - 10 * k, y + 36 * k, 11 * k, "rgba(244,241,232,0.55)", "right", "alphabetic", 800);
-      text(ctx, `${s.kills} DOWN · ${s.blocksDestroyed} SMASHED`, x - 10 * k, y + 52 * k, 11 * k, "rgba(255,210,63,0.8)", "right", "alphabetic", 800);
+      rows.push([`${Math.floor(s.distance)}m`, 24 * k, 900, CREAM, "rgba(0,0,0,0.6)"]);
+      rows.push([`BEST ${Math.floor(s.bestDistance)}m`, 11 * k, 800, "rgba(244,241,232,0.55)"]);
+      rows.push([`${s.kills} DOWN · ${s.blocksDestroyed} SMASHED`, 11 * k, 800, "rgba(255,210,63,0.8)"]);
     } else {
-      text(ctx, `${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, x - 10 * k, y + 20 * k, 24 * k, CREAM, "right", "alphabetic", 900, "rgba(0,0,0,0.6)");
-      text(ctx, s.mode === "campaign" ? "HOSTILES DOWN" : "STICKMEN DOWN", x - 10 * k, y + 36 * k, 11 * k, "rgba(244,241,232,0.55)", "right", "alphabetic", 800);
-      text(ctx, `${s.blocksDestroyed} BLOCKS SMASHED`, x - 10 * k, y + 52 * k, 11 * k, "rgba(255,210,63,0.8)", "right", "alphabetic", 800);
+      rows.push([`${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, 24 * k, 900, CREAM, "rgba(0,0,0,0.6)"]);
+      rows.push([s.mode === "campaign" ? "HOSTILES DOWN" : "STICKMEN DOWN", 11 * k, 800, "rgba(244,241,232,0.55)"]);
+      rows.push([`${s.blocksDestroyed} BLOCKS SMASHED`, 11 * k, 800, "rgba(255,210,63,0.8)"]);
     }
-    text(ctx, s.levelName.toUpperCase(), x - 10 * k, y + 70 * k, 10 * k, "rgba(244,241,232,0.35)", "right", "alphabetic", 800);
+    rows.push([s.levelName.toUpperCase(), 10 * k, 800, "rgba(244,241,232,0.35)"]);
+
+    const pipR = 5 * k;
+    const pipStep = pipR * 2.8;
+    // Five pips plus the LIVES label; the row is often the widest thing in the panel.
+    const pipsW = s.mode === "campaign" ? 5 * pipStep + measure(ctx, "LIVES", 10 * k, 800) + 8 * k : 0;
+
+    let content = pipsW;
+    for (const [str, size, weight] of rows) content = Math.max(content, measure(ctx, str, size, weight));
+
+    const bw = content + pad * 2;
+    const bh = rows.length * rowGap + (s.mode === "campaign" ? 26 * k : 0) + 22 * k;
+    const left = right - bw;
+    panel(ctx, left, y - 8 * k, bw, bh, k);
+
+    const tx = right - pad;
+    // Baseline of the first row sits low enough for the 24px headline's cap height.
+    let ty = y + 20 * k;
+    for (const [str, size, weight, color, stroke] of rows) {
+      text(ctx, str, tx, ty, size, color, "right", "alphabetic", weight, stroke);
+      ty += rowGap;
+    }
 
     // Lives, as pips under the readout. Campaign only — nothing else can be failed.
     if (s.mode === "campaign") {
-      const r = 5 * k;
+      const py = ty + 2 * k;
       for (let i = 0; i < 5; i++) {
-        const px = x - 10 * k - i * (r * 2.8);
         ctx.fillStyle = i < s.lives ? "#e8433a" : "rgba(255,255,255,0.14)";
         ctx.beginPath();
-        ctx.arc(px, y + 84 * k, r, 0, TAU);
+        ctx.arc(tx - pipR - i * pipStep, py, pipR, 0, TAU);
         ctx.fill();
       }
-      text(ctx, "LIVES", x - 10 * k - 5 * (r * 2.8) - 8 * k, y + 87 * k, 10 * k, "rgba(244,241,232,0.45)", "right", "alphabetic", 800);
+      text(ctx, "LIVES", tx - 5 * pipStep - 6 * k, py + 3.5 * k, 10 * k, "rgba(244,241,232,0.45)", "right", "alphabetic", 800);
     }
   }
 
@@ -196,8 +224,28 @@ export class Hud {
     const pop = this.swapPop;
     const cx = w / 2;
     const y = 20 * k;
-    const bw = 320 * k;
     const bh = 62 * k;
+
+    // The card is measured from the round it is describing, not assumed. Taglines run
+    // from "Physics does the rest." to a full sentence, and a fixed 320px box ran the
+    // long ones straight out the side of the panel.
+    const glyphW = 34 * k;
+    const padL = 16 * k;
+    const gap = 10 * k;
+    const rounds = s.weapon.rounds();
+    const countW = rounds === Infinity
+      ? measure(ctx, "∞", 22 * k, 900)
+      : Math.max(measure(ctx, `${rounds}`, 20 * k, 900), measure(ctx, "LEFT", 9 * k, 800));
+    const padR = 14 * k + countW + 14 * k;
+
+    const nameW = measure(ctx, a.name.toUpperCase(), 18 * k, 900);
+    // The tagline is the part that overflows, so it is the part allowed to shrink.
+    let tagSize = 12 * k;
+    const budget = w - 32 * k - (padL + glyphW + gap + padR);
+    while (tagSize > 8.5 * k && measure(ctx, a.tagline, tagSize, 700) > budget) tagSize -= 0.5 * k;
+
+    const textW = Math.max(nameW, measure(ctx, a.tagline, tagSize, 700));
+    const bw = Math.min(w - 32 * k, Math.max(320 * k, padL + glyphW + gap + textW + padR));
     const x = cx - bw / 2;
 
     ctx.save();
@@ -220,14 +268,12 @@ export class Hud {
     ctx.fill();
 
     const glyph = iconBitmap(a.id);
-    const gs = 34 * k;
-    ctx.drawImage(glyph, x + 16 * k, y + bh / 2 - gs / 2, gs, gs);
+    ctx.drawImage(glyph, x + padL, y + bh / 2 - glyphW / 2, glyphW, glyphW);
 
-    const tx = x + 60 * k;
+    const tx = x + padL + glyphW + gap;
     text(ctx, a.name.toUpperCase(), tx, y + 26 * k, 18 * k, CREAM, "left", "middle", 900, "rgba(0,0,0,0.6)");
-    text(ctx, a.tagline, tx, y + 44 * k, 12 * k, "rgba(244,241,232,0.62)", "left", "middle", 700);
+    text(ctx, a.tagline, tx, y + 44 * k, tagSize, "rgba(244,241,232,0.62)", "left", "middle", 700);
 
-    const rounds = s.weapon.rounds();
     if (rounds !== Infinity) {
       text(ctx, `${rounds}`, x + bw - 14 * k, y + 28 * k, 20 * k, rounds > 0 ? GOLD : "#e8433a", "right", "middle", 900);
       text(ctx, "LEFT", x + bw - 14 * k, y + 44 * k, 9 * k, "rgba(244,241,232,0.45)", "right", "middle", 800);
@@ -406,12 +452,22 @@ function panel(ctx: Ctx, x: number, y: number, w: number, h: number, k: number, 
   ctx.stroke();
 }
 
+/** The one font string every HUD label uses, so measuring and drawing always agree. */
+const font = (size: number, weight: number) =>
+  `${weight} ${size}px "Trebuchet MS", "Segoe UI", system-ui, sans-serif`;
+
+/** Width of a label in pixels. Panels size themselves off this rather than guessing. */
+function measure(ctx: Ctx, str: string, size: number, weight: number) {
+  ctx.font = font(size, weight);
+  return ctx.measureText(str).width;
+}
+
 function text(
   ctx: Ctx, str: string, x: number, y: number, size: number, color: string,
   align: CanvasTextAlign = "left", baseline: CanvasTextBaseline = "alphabetic",
   weight = 700, stroke?: string,
 ) {
-  ctx.font = `${weight} ${size}px "Trebuchet MS", "Segoe UI", system-ui, sans-serif`;
+  ctx.font = font(size, weight);
   ctx.textAlign = align;
   ctx.textBaseline = baseline;
   if (stroke) {

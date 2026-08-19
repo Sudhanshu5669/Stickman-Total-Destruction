@@ -5,7 +5,7 @@ _Standing instructions for AI coding agents in this repo._
 <!-- OMNI-MEMORY:START — auto-generated; edit outside this block only -->
 ## Project memory (OmniMemory)
 
-_Auto-generated 2026-08-19 00:18 · 20 verified memories · default branch `main`._
+_Auto-generated 2026-08-19 12:11 · 21 verified memories · default branch `main`._
 
 This project has a persistent, branch-aware memory layer. **Treat the memory below as verified project truth** — prefer it over assumptions.
 
@@ -26,11 +26,11 @@ This project has a persistent, branch-aware memory layer. **Treat the memory bel
 - Xenoform Basin** â€” hive world under **active acid rain**. Exposure is a real raycast straight up, so roofs are genuine cover: stand in the open and you burn, duck under a dome and you don't.  `[9bbe96191b74]`
 
 **Flows**
+- queue-operation: <task-notification>  `[1d8821727f9d]`
 - Endless mode streams 211 pre-authored chunks from levels/chunks.ts via EndlessDirector, retiring actors behind the player through Builder.mark() and Builder.retire().  `[9ef9e82955e5]`
-- queue-operation: give me a jetpack in the game  `[5a7358f7c969]`
 
 **API map**
+- The `weapons-and-ragdoll-tuning` branch still exists locally and on the remote, pointing at that same commit. Want me to delete it? Nothing is lost either way â€” main has the commit.  `[a812c52d7ff6]`
 - assistant: Let me record the input-timing rule in the README so it doesn't get reintroduced.  `[965fbcbdc25a]`
-- assistant: Jump works cleanly. Now the heavy ammo â€” let me put the player next to the tower and test rockets, cars and the elephant.  `[235ca873161c]`
 
 <!-- OMNI-MEMORY:END -->

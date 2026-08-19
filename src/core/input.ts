@@ -25,6 +25,20 @@ export class Input {
   /** True once the player has actually touched the controls (used to gate the intro hint). */
   engaged = false;
 
+  // ------------------------------------------------------------- virtual input
+  /**
+   * Written by the on-screen controls on touch devices. Kept as plain fields the
+   * touch layer pokes rather than a second input path, so everything downstream —
+   * player, menu, HUD — keeps reading one `Input` and never learns that phones exist.
+   */
+  touchMode = false;
+  virtualMoveX = 0;
+  virtualJumpHeld = false;
+  virtualJumpPressed = false;
+  virtualCrouch = false;
+  /** Latched ammo cycle from the on-screen swap buttons; consumed like a key edge. */
+  virtualCycle = 0;
+
   constructor(private readonly canvas: HTMLCanvasElement) {
     // Start at the centre of the viewport. Leaving it at (0,0) would make the very
     // first frames aim at the top-left corner and yank the camera off the player.
@@ -63,12 +77,17 @@ export class Input {
   };
 
   private onPointerMove = (e: PointerEvent) => {
+    if (this.touchMode && e.pointerType === "touch") return;
     const r = this.canvas.getBoundingClientRect();
     this.mouse.x = e.clientX - r.left;
     this.mouse.y = e.clientY - r.top;
   };
 
   private onPointerDown = (e: PointerEvent) => {
+    // On a touch device the on-screen controls own every touch and synthesise aim and
+    // fire themselves; letting the raw event through as well would make a thumb on the
+    // movement stick also pull the trigger.
+    if (this.touchMode && e.pointerType === "touch") return;
     this.onPointerMove(e);
     this.engaged = true;
     if (e.button === 0) {
@@ -81,6 +100,7 @@ export class Input {
   };
 
   private onPointerUp = (e: PointerEvent) => {
+    if (this.touchMode && e.pointerType === "touch") return;
     if (e.button === 0) {
       this.mouseDown = false;
       this.mouseReleased = true;
@@ -106,9 +126,23 @@ export class Input {
     return codes.some((c) => this.releasedKeys.has(c));
   }
 
-  /** -1 / 0 / +1 horizontal move axis. */
+  /** -1..+1 horizontal move axis, from the keyboard or the on-screen stick. */
   get moveX() {
-    return (this.held("KeyD", "ArrowRight") ? 1 : 0) - (this.held("KeyA", "ArrowLeft") ? 1 : 0);
+    const keys = (this.held("KeyD", "ArrowRight") ? 1 : 0) - (this.held("KeyA", "ArrowLeft") ? 1 : 0);
+    return keys !== 0 ? keys : this.virtualMoveX;
+  }
+
+  /** Jump/jetpack, either source. */
+  jumpHeld() {
+    return this.held("Space", "KeyW", "ArrowUp") || this.virtualJumpHeld;
+  }
+
+  jumpPressed() {
+    return this.pressed("Space", "KeyW", "ArrowUp") || this.virtualJumpPressed;
+  }
+
+  crouchHeld() {
+    return this.held("KeyS", "ArrowDown") || this.virtualCrouch;
   }
 
   /**
@@ -122,6 +156,8 @@ export class Input {
     this.mouseReleased = false;
     this.rightPressed = false;
     this.wheel = 0;
+    this.virtualJumpPressed = false;
+    this.virtualCycle = 0;
   }
 }
 

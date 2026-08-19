@@ -25,6 +25,11 @@ export interface Material {
   /** Hit points removed per kJ of impact energy above `ignore`. */
   fragility: number;
   sound: "wood" | "stone" | "glass" | "metal" | "flesh";
+  /**
+   * 0 = fireproof, 1 = tinder. Drives how readily the flamethrower lights it, how
+   * fast it burns down and how far the fire jumps to its neighbours.
+   */
+  burn: number;
   debris: string;
   points: number;
   explodes?: { radius: number; force: number; damage: number };
@@ -36,59 +41,59 @@ const ACID_FLOOR = 0.3;
 export const MATERIALS: Record<MaterialId, Material> = {
   wood: {
     id: "wood", color: "#b5813f", density: 220, toughness: 130, friction: 0.85, restitution: 0.06,
-    ignore: 0.5, fragility: 3.5, sound: "wood", debris: "#8b6130", points: 10,
+    ignore: 0.5, fragility: 3.5, sound: "wood", burn: 1, debris: "#8b6130", points: 10,
   },
   brick: {
     id: "brick", color: "#b4503f", density: 700, toughness: 300, friction: 0.9, restitution: 0.03,
-    ignore: 2.0, fragility: 2.6, sound: "stone", debris: "#8e3d30", points: 15,
+    ignore: 2.0, fragility: 2.6, sound: "stone", burn: 0.05, debris: "#8e3d30", points: 15,
   },
   concrete: {
     id: "concrete", color: "#9aa0a8", density: 900, toughness: 520, friction: 0.92, restitution: 0.02,
-    ignore: 3.5, fragility: 2.0, sound: "stone", debris: "#767c85", points: 25,
+    ignore: 3.5, fragility: 2.0, sound: "stone", burn: 0.03, debris: "#767c85", points: 25,
   },
   glass: {
     id: "glass", color: "#8fd8e8", density: 260, toughness: 26, friction: 0.4, restitution: 0.05,
-    ignore: 0.05, fragility: 40, sound: "glass", debris: "#bff0fb", points: 8,
+    ignore: 0.05, fragility: 40, sound: "glass", burn: 0, debris: "#bff0fb", points: 8,
   },
   metal: {
     id: "metal", color: "#7f8896", density: 1400, toughness: 900, friction: 0.6, restitution: 0.14,
-    ignore: 7, fragility: 1.3, sound: "metal", debris: "#5e6875", points: 40,
+    ignore: 7, fragility: 1.3, sound: "metal", burn: 0.02, debris: "#5e6875", points: 40,
   },
   ice: {
     id: "ice", color: "#bfe9ff", density: 330, toughness: 60, friction: 0.05, restitution: 0.1,
-    ignore: 0.2, fragility: 12, sound: "glass", debris: "#e4f7ff", points: 12,
+    ignore: 0.2, fragility: 12, sound: "glass", burn: 0, debris: "#e4f7ff", points: 12,
   },
   explosive: {
     id: "explosive", color: "#e8433a", density: 300, toughness: 45, friction: 0.8, restitution: 0.05,
-    ignore: 0.15, fragility: 20, sound: "metal", debris: "#ffb03a", points: 60,
+    ignore: 0.15, fragility: 20, sound: "metal", burn: 0.9, debris: "#ffb03a", points: 60,
     explodes: { radius: 6.5, force: 22, damage: 240 },
   },
   gold: {
     id: "gold", color: "#f2c14e", density: 1500, toughness: 280, friction: 0.8, restitution: 0.05,
-    ignore: 2, fragility: 2.6, sound: "metal", debris: "#ffe08a", points: 250,
+    ignore: 2, fragility: 2.6, sound: "metal", burn: 0, debris: "#ffe08a", points: 250,
   },
 
   // --- alien world -------------------------------------------------------------
   /** Brittle and valuable — shatters spectacularly, pays out like it. */
   crystal: {
     id: "crystal", color: "#b07ce8", density: 340, toughness: 40, friction: 0.35, restitution: 0.2,
-    ignore: 0.1, fragility: 26, sound: "glass", debris: "#e0b6ff", points: 45,
+    ignore: 0.1, fragility: 26, sound: "glass", burn: 0.08, debris: "#e0b6ff", points: 45,
   },
   /** Springy organic matter: soaks up impacts and bounces the debris around. */
   biomass: {
     id: "biomass", color: "#5f9e4a", density: 400, toughness: 200, friction: 0.95, restitution: 0.42,
-    ignore: 1.5, fragility: 2.2, sound: "flesh", debris: "#3f7431", points: 20,
+    ignore: 1.5, fragility: 2.2, sound: "flesh", burn: 0.85, debris: "#3f7431", points: 20,
   },
 
   // --- mars --------------------------------------------------------------------
   sandstone: {
     id: "sandstone", color: "#b5643a", density: 620, toughness: 240, friction: 0.9, restitution: 0.04,
-    ignore: 1.4, fragility: 3.0, sound: "stone", debris: "#8a4526", points: 14,
+    ignore: 1.4, fragility: 3.0, sound: "stone", burn: 0.04, debris: "#8a4526", points: 14,
   },
   /** Pressurised habitat panelling. Tough, but the whole point is popping it. */
   hull: {
     id: "hull", color: "#e6e2d8", density: 700, toughness: 430, friction: 0.7, restitution: 0.1,
-    ignore: 4, fragility: 1.7, sound: "metal", debris: "#b9b3a5", points: 35,
+    ignore: 4, fragility: 1.7, sound: "metal", burn: 0.12, debris: "#b9b3a5", points: 35,
   },
 };
 
@@ -153,8 +158,14 @@ export class Block implements Actor, PhysOwner {
    */
   private frozenGrace = 0;
 
+  /** Fire-sim state. See `PhysOwner` — the sims write these directly. */
+  readonly flammability: number;
+  burning = 0;
+  soaked = 0;
+
   constructor(private readonly game: GameCtx, o: BlockOptions) {
     this.mat = MATERIALS[o.material];
+    this.flammability = this.mat.burn;
     this.w = o.w;
     this.h = o.h;
     this.anchored = o.anchored ?? true;
@@ -207,6 +218,14 @@ export class Block implements Actor, PhysOwner {
   get pos(): V {
     const t = this.body.translation();
     return v(t.x, t.y);
+  }
+
+  firePos(): V {
+    return this.pos;
+  }
+
+  get fireSize() {
+    return Math.max(0.4, Math.min(this.w, this.h) * 0.6);
   }
 
   onImpact(_other: PhysOwner | null, energy: number, point: V) {
@@ -341,8 +360,26 @@ export class Block implements Actor, PhysOwner {
 
     at(ctx, t.x, t.y, r, () => {
       const translucent = m.id === "glass" || m.id === "ice" || m.id === "crystal";
-      const base = translucent ? rgba(m.color, m.id === "crystal" ? 0.68 : 0.55) : m.color;
+      // Char darkens toward soot as it burns; soaked stone just goes a shade deeper.
+      const tinted = this.burning > 0.01
+        ? shade(m.color, -0.62 * this.burning)
+        : this.soaked > 0.05 ? shade(m.color, -0.18 * clamp(this.soaked, 0, 1)) : m.color;
+      const base = translucent ? rgba(tinted, m.id === "crystal" ? 0.68 : 0.55) : tinted;
       roundBox(ctx, this.w, this.h, Math.min(0.06, this.w * 0.2), base, shade(m.color, -0.4), 0.045);
+
+      // Embers crawling over the charred face.
+      if (this.burning > 0.01) {
+        const n = 3;
+        for (let i = 0; i < n; i++) {
+          const h = hash01(this.seed + i * 3.7);
+          const flick = 0.35 + 0.65 * Math.abs(Math.sin(this.game.time * 7 + h * 9));
+          ctx.fillStyle = rgba(flick > 0.7 ? "#ffc25e" : "#e8531f", flick * this.burning * 0.8);
+          ctx.fillRect(
+            (h - 0.5) * this.w * 0.8, (hash01(this.seed + i * 8.1) - 0.5) * this.h * 0.8,
+            Math.min(0.14, this.w * 0.2), Math.min(0.1, this.h * 0.16),
+          );
+        }
+      }
 
       // Top highlight gives the flat blocks a readable light direction.
       ctx.fillStyle = rgba("#ffffff", translucent ? 0.22 : 0.13);

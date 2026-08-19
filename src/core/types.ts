@@ -1,6 +1,9 @@
 import type { Camera } from "./camera";
 import type { Physics } from "./physics";
 import type { Particles } from "../fx/particles";
+import type { Decals } from "../fx/decals";
+import type { WaterSim } from "../fx/fluid";
+import type { FireSim } from "../fx/fire";
 import type { Ctx } from "../render/draw";
 import type { Theme } from "../render/theme";
 import type { V } from "./math";
@@ -47,6 +50,12 @@ export interface TargetRef {
 export interface GameCtx {
   readonly physics: Physics;
   readonly particles: Particles;
+  /** Lasting marks on the world: blood pools, scorch, wet patches. */
+  readonly decals: Decals;
+  /** The position-based fluid solver. Weapons emit into it; fire boils it away. */
+  readonly water: WaterSim;
+  /** Flame gas plus the heat ledger that decides what is alight and what spreads. */
+  readonly fire: FireSim;
   readonly camera: Camera;
   /** Palette of the world currently loaded. */
   readonly theme: Theme;

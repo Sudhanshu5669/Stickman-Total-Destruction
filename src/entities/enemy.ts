@@ -5,6 +5,7 @@ import { drawBiped } from "../render/creatures";
 import { angleDelta, clamp, dist, rand, v, type V } from "../core/math";
 import { at, rgba, type Ctx } from "../render/draw";
 import { sfx } from "../fx/audio";
+import { bleed, bloodBurst, bloodPool, severLimbs } from "../fx/gore";
 import { Bullet, RIFLE, SHOTGUN, SMG, SNIPER, type BulletSpec } from "./bullet";
 
 export type EnemyKind = "grunt" | "guard" | "boss";
@@ -190,7 +191,9 @@ export class Enemy implements Actor {
 
   private onHurt(amount: number, at_: V) {
     this.panic = 1;
-    this.game.particles.blood(at_.x, at_.y, clamp(Math.round(amount / 2), 2, 16), undefined, 7);
+    bloodBurst(this.game, at_, undefined, amount * 0.7, this.ragdoll.splatColor);
+    // Anything past a graze leaves a mark on the floor under it.
+    if (amount > 18 && Math.random() < 0.5) bloodPool(this.game, at_, rand(0.3, 0.8));
     if (amount > 12) {
       // A solid hit staggers them into a full ragdoll for a moment.
       this.ragdoll.goLimp();
@@ -203,12 +206,17 @@ export class Enemy implements Actor {
 
   private onDeath() {
     const c = this.pos;
-    this.game.particles.blood(c.x, c.y, 26, undefined, 12);
+    const r = this.ragdoll;
+    // How hard the killing blow was decides whether this is a corpse or a mess.
+    const cut = severLimbs(this.game, r, r.lastDamage);
+    bloodBurst(this.game, c, undefined, 34 + cut * 16, r.splatColor);
+    bloodPool(this.game, c, rand(0.8, 1.5) + cut * 0.35);
     this.game.particles.stars(c.x, c.y, 7);
     this.game.reportDestruction("enemy", c);
     this.game.award(this.spec.points, c);
     sfx.scream();
-    this.corpseTimer = 14;
+    // Bodies that came apart are worth looking at for longer.
+    this.corpseTimer = cut > 0 ? 22 : 14;
   }
 
   /** Alerts this enemy — used when something explodes nearby. */
@@ -232,6 +240,7 @@ export class Enemy implements Actor {
     const r = this.ragdoll;
     if (this.updateDormancy()) return;
     this.voiceCd = Math.max(0, this.voiceCd - dt);
+    bleed(this.game, r, dt);
 
     if (r.dead) {
       this.corpseTimer -= dt;
@@ -246,6 +255,8 @@ export class Enemy implements Actor {
       return;
     }
 
+    // Being on fire is not something a stickman takes calmly.
+    if (r.burning > 0.01) this.panic = 1;
     this.panic = Math.max(0, this.panic - dt * 0.35);
     this.probeGround();
 

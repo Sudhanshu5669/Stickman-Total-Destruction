@@ -22,7 +22,7 @@ const DEFAULT: Required<SkinStyle> = {
 };
 
 /** Draws one bone as a thick capsule stroke from end to end of its local Y axis. */
-function limb(ctx: Ctx, b: Bone | undefined, color: string, weight: number) {
+function limb(ctx: Ctx, b: Bone | undefined, color: string, weight: number, gore = "#7d0e1c") {
   if (!b) return;
   const t = b.body.translation();
   const r = b.body.rotation();
@@ -35,6 +35,15 @@ function limb(ctx: Ctx, b: Bone | undefined, color: string, weight: number) {
     ctx.moveTo(0, -half);
     ctx.lineTo(0, half);
     ctx.stroke();
+    // Torn end. A bone is jointed to its parent at its proximal (+Y) end, so that is
+    // where the cut is; the wet stump is what sells the limb as *torn off* rather
+    // than merely detached.
+    if (b.severed) {
+      ctx.fillStyle = gore;
+      ctx.beginPath();
+      ctx.arc(0, half, b.thick * weight * 0.56, 0, TAU);
+      ctx.fill();
+    }
   });
 }
 
@@ -50,8 +59,17 @@ export function drawBiped(ctx: Ctx, r: Ragdoll, style: SkinStyle = DEFAULT) {
   const w = s.weight;
   const lite = r.has("armBack");
 
-  // Back-facing limbs are drawn first and dimmed, which reads as depth on a flat figure.
-  const back = shade(s.ink, 0.28);
+  // Charring darkens the whole figure while it is alight, so a burning stickman
+  // reads as a silhouette in a fire rather than an unchanged one standing in it.
+  if (r.burning > 0.01) {
+    const c = shade(s.ink, -0.45 * r.burning);
+    s.ink = c;
+    s.fill = shade(s.fill, -0.45 * r.burning);
+  }
+
+  // Back-facing limbs used to be drawn lighter for depth; the figure now reads as one
+  // solid silhouette, so every bone shares the body colour.
+  const back = s.ink;
   if (lite) {
     limb(ctx, r.bones.get("legBack"), back, w);
     limb(ctx, r.bones.get("armBack"), back, w);
@@ -89,6 +107,13 @@ function drawHead(ctx: Ctx, r: Ragdoll, s: Required<SkinStyle>) {
 
   at(ctx, t.x, t.y, rot, () => {
     disc(ctx, 0, 0, rad, s.fill, s.outline, rad * 0.1);
+    // Ragged neck on a head that has come off, drawn under the face.
+    if (head.severed) {
+      ctx.fillStyle = "#7d0e1c";
+      ctx.beginPath();
+      ctx.arc(0, -rad * 0.82, rad * 0.42, 0, TAU);
+      ctx.fill();
+    }
 
     const eyeY = rad * 0.16;
     const eyeX = rad * 0.34;

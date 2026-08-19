@@ -53,6 +53,23 @@ export interface PhysOwner {
    * strength destroys it. Fired by the fridge round.
    */
   freeze?(): void;
+
+  // ------------------------------------------------------------- heat and water
+  //
+  // The particle sims write these directly. Keeping them as plain fields rather than
+  // methods matters: they are touched thousands of times a frame from the fluid and
+  // flame loops, and a virtual call per droplet is exactly the cost worth avoiding.
+
+  /** 0 = fireproof, 1 = tinder. Absent means "cannot burn". */
+  flammability?: number;
+  /** 0..1, how alight this is. Written by the fire sim, read by the renderer. */
+  burning?: number;
+  /** 0..1, how soaked. Written by the water sim; soaked things will not light. */
+  soaked?: number;
+  /** Where flames should sit on this object. Required for it to burn at all. */
+  firePos?(): V;
+  /** Rough half-size in metres, so big things throw bigger fires. */
+  readonly fireSize?: number;
 }
 
 export interface ImpactEvent {

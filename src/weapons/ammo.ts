@@ -32,7 +32,18 @@ export interface AmmoDef {
   reserve: number;
   /** Distance from the hand the projectile appears at, in metres. */
   muzzle: number;
-  spawn(game: GameCtx, pos: V, dir: V, facing: 1 | -1): Actor;
+  /**
+   * Fires discrete objects. Omitted by continuous weapons, which use `stream`.
+   */
+  spawn?(game: GameCtx, pos: V, dir: V, facing: 1 | -1): Actor;
+  /**
+   * Continuous ammo: called every frame the trigger is held instead of spawning
+   * projectiles, with the frame's `dt` so emission rates stay frame-rate independent.
+   * The hose and the flamethrower feed the fluid and flame sims through this.
+   */
+  stream?(game: GameCtx, muzzle: V, dir: V, dt: number, facing: 1 | -1): void;
+  /** Continuous weapons get a nozzle instead of a barrel. */
+  nozzle?: boolean;
   onFire?(game: GameCtx): void;
 }
 
@@ -270,7 +281,7 @@ export const AMMO: AmmoDef[] = [
     tagline: "Eats the level. Then itself.",
     tint: "#8a5cff",
     count: 1, spread: 0.02, speed: 20, speedVar: 0, cooldown: 5,
-    recoil: 3, heft: 0.55, auto: false, reserve: 3, muzzle: 1.4,
+    recoil: 3, heft: 0.55, auto: false, reserve: -1, muzzle: 1.4,
     onFire: () => sfx.blackhole(),
     spawn: makeRigid(rigid({
       shape: "ball", w: 1.1, h: 1.1, density: 40,
@@ -279,6 +290,35 @@ export const AMMO: AmmoDef[] = [
       explode: { radius: 17, force: 44, damage: 700, minEnergy: 1e9 },
       impactSound: "none", draw: P.drawBlackhole, points: 300, life: 14,
     })),
+  },
+  {
+    id: "water",
+    name: "Hydro Cannon",
+    tagline: "A real fluid, simulated droplet by droplet. Hold it and watch the level flood.",
+    tint: "#4fc3f7",
+    // Continuous: no cooldown, no per-shot recoil worth the name. `count`/`speed` are
+    // still filled in because the HUD and the aim preview read them.
+    count: 0, spread: 0.05, speed: 38, speedVar: 0, cooldown: 0,
+    recoil: 5.5, heft: 0.3, auto: true, reserve: -1, muzzle: 1.1, nozzle: true,
+    stream: (game, muzzle, dir, dt) => {
+      game.water.spray(muzzle, dir, dt, { speed: 38, spread: 0.05, rate: 260, life: 7 });
+      // A jet this heavy blows a hole in a wall of flame as well as putting it out.
+      game.particles.emit("smoke", muzzle.x, muzzle.y, {
+        vx: dir.x * 4, vy: dir.y * 4, maxLife: 0.25, size: 0.16, grow: 1.2,
+        drag: 3, color: "#bfe6ff",
+      });
+    },
+  },
+  {
+    id: "flamethrower",
+    name: "Flamethrower",
+    tagline: "Sets the world alight, and the fire keeps going without you.",
+    tint: "#ff7a29",
+    count: 0, spread: 0.075, speed: 42, speedVar: 0, cooldown: 0,
+    recoil: 2.5, heft: 0.35, auto: true, reserve: -1, muzzle: 1.15, nozzle: true,
+    stream: (game, muzzle, dir, dt) => {
+      game.fire.jet(muzzle, dir, dt, { speed: 42, spread: 0.075, rate: 150, life: 1.5 });
+    },
   },
 ];
 

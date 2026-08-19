@@ -27,14 +27,33 @@ export const smoothstep = (t: number) => {
   return c * c * (3 - 2 * c);
 };
 
-export const rand = (lo = 0, hi = 1) => lo + Math.random() * (hi - lo);
+/**
+ * The source every helper below draws from.
+ *
+ * Swappable so the daily challenge can build its world from a seeded stream — see
+ * `core/rng`. Everything that shapes a *level* goes through these helpers; per-frame
+ * effects call `Math.random` directly and are deliberately left out of the seeded
+ * stream, since their call count depends on frame rate and would desync the seed.
+ */
+let source: () => number = Math.random;
+
+/** Replaces the random source. Returns the undo, which callers must always run. */
+export function setRandomSource(fn: () => number): () => void {
+  const prev = source;
+  source = fn;
+  return () => {
+    source = prev;
+  };
+}
+
+export const rand = (lo = 0, hi = 1) => lo + source() * (hi - lo);
 export const randi = (lo: number, hi: number) => Math.floor(rand(lo, hi + 1));
-export const randSign = () => (Math.random() < 0.5 ? -1 : 1);
-export const chance = (p: number) => Math.random() < p;
-export const pick = <T,>(arr: readonly T[]): T => arr[(Math.random() * arr.length) | 0];
+export const randSign = () => (source() < 0.5 ? -1 : 1);
+export const chance = (p: number) => source() < p;
+export const pick = <T,>(arr: readonly T[]): T => arr[(source() * arr.length) | 0];
 
 /** Gaussian-ish spread, tighter around 0 than a flat random. */
-export const randSpread = (amount: number) => (Math.random() + Math.random() - 1) * amount;
+export const randSpread = (amount: number) => (source() + source() - 1) * amount;
 
 /** Deterministic hash -> [0,1). Handy for per-object "hand drawn" jitter that doesn't crawl. */
 export function hash01(n: number) {

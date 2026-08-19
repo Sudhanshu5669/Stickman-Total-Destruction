@@ -1,5 +1,5 @@
 import { RAPIER, type Physics, type PhysOwner, newSelfGroup, FILTER, ig, G, ALL } from "../core/physics";
-import { clamp, v, type V } from "../core/math";
+import { clamp, rand, v, type V } from "../core/math";
 
 export type BoneShape = "box" | "ball" | "capsule";
 
@@ -44,6 +44,8 @@ export interface Bone {
   thick: number;
   color: string;
   parent: Bone | null;
+  /** Cut free of its parent. Renders a stump and keeps bleeding. */
+  severed?: boolean;
 }
 
 export interface Joint {
@@ -128,6 +130,30 @@ export class Ragdoll implements PhysOwner {
 
   onDeath?: (self: Ragdoll) => void;
   onHurt?: (self: Ragdoll, amount: number, at: V) => void;
+
+  // ------------------------------------------------------------------ gore/heat
+
+  /** Bones cut free of the skeleton, by name. */
+  readonly severedBones = new Set<string>();
+  /** Size of the blow that last landed, so death can decide how messy it was. */
+  lastDamage = 0;
+  /** Accumulates between blood drips from open wounds. */
+  bleedTimer = 0;
+
+  /** Flesh catches easily. Cleared on things that have no business burning. */
+  flammability = 0.55;
+  /** 0..1 alight, written by the fire sim; the renderer reads it for char and embers. */
+  burning = 0;
+  /** 0..1 soaked, written by the water sim. Soaked bodies will not light. */
+  soaked = 0;
+
+  firePos(): V {
+    return this.center();
+  }
+
+  get fireSize() {
+    return 0.75 * this.scale;
+  }
 
   constructor(
     private readonly physics: Physics,
@@ -458,10 +484,48 @@ export class Ragdoll implements PhysOwner {
     this.takeDamage((kj - this.impactIgnore) * this.impactFragility, point);
   }
 
+  /**
+   * Cuts one bone free of its parent, permanently.
+   *
+   * Removing the revolute joint is all it takes — the bone is already its own rigid
+   * body, so it keeps simulating, keeps colliding and tumbles away under whatever
+   * momentum took it off. Anything hanging below it (a hand on a severed forearm)
+   * goes with it, still jointed, which is exactly right.
+   *
+   * @returns the world point the limb came off at, or null if there was nothing to cut.
+   */
+  sever(name: string): V | null {
+    const j = this.joints.get(name);
+    if (!j || this.disposed) return null;
+    const t = j.child.body.translation();
+    const pt = v(t.x, t.y);
+
+    try {
+      this.physics.removeJoint(j.joint);
+    } catch {
+      /* the joint went with a body already */
+    }
+    this.joints.delete(name);
+    const i = this.jointList.indexOf(j);
+    if (i >= 0) this.jointList.splice(i, 1);
+
+    j.child.severed = true;
+    this.severedBones.add(name);
+    // Losing a limb costs the whole body its posture: nothing stands on one leg.
+    if (this.rootLocked) this.lockRoot(false);
+    this.goLimp();
+
+    const m = j.child.body.mass();
+    j.child.body.applyImpulse(v(rand(-4, 4) * m, rand(1, 6) * m), true);
+    j.child.body.applyTorqueImpulse(rand(-1, 1) * m * 0.6, true);
+    return pt;
+  }
+
   takeDamage(amount: number, at?: V) {
     if (this.dead || this.disposed || this.invulnerable || amount <= 0) return;
     const dmg = amount * this.damageScale;
     if (dmg <= 0) return;
+    this.lastDamage = dmg;
     this.hp -= dmg;
     this.onHurt?.(this, dmg, at ?? this.center());
     if (this.hp <= 0) {
@@ -515,14 +579,14 @@ export const BIPED: RagdollSpec = {
     { name: "torso", x: 0, y: 1.28, w: 0.26, h: 0.46, density: 210, parent: "pelvis", jx: 0, jy: 1.06, min: -0.55, max: 0.55, thick: 0.19, color: SKIN },
     { name: "head", x: 0, y: 1.68, w: 0.31, h: 0.31, shape: "ball", density: 120, parent: "torso", jx: 0, jy: 1.52, min: -0.6, max: 0.6, thick: 0.31, color: SKIN },
 
-    { name: "armBackUp", x: -0.03, y: 1.3, w: 0.09, h: 0.32, shape: "capsule", density: 120, parent: "torso", jx: -0.02, jy: 1.46, min: -2.9, max: 2.9, thick: 0.1, color: "#2b303c" },
-    { name: "armBackLo", x: -0.03, y: 1.0, w: 0.08, h: 0.3, shape: "capsule", density: 105, parent: "armBackUp", jx: -0.03, jy: 1.14, min: -2.5, max: 0.05, thick: 0.09, color: "#2b303c" },
+    { name: "armBackUp", x: -0.03, y: 1.3, w: 0.09, h: 0.32, shape: "capsule", density: 120, parent: "torso", jx: -0.02, jy: 1.46, min: -2.9, max: 2.9, thick: 0.1, color: SKIN },
+    { name: "armBackLo", x: -0.03, y: 1.0, w: 0.08, h: 0.3, shape: "capsule", density: 105, parent: "armBackUp", jx: -0.03, jy: 1.14, min: -2.5, max: 0.05, thick: 0.09, color: SKIN },
     { name: "armFrontUp", x: 0.03, y: 1.3, w: 0.09, h: 0.32, shape: "capsule", density: 120, parent: "torso", jx: 0.02, jy: 1.46, min: -2.9, max: 2.9, thick: 0.1, color: SKIN },
     { name: "armFrontLo", x: 0.03, y: 1.0, w: 0.08, h: 0.3, shape: "capsule", density: 105, parent: "armFrontUp", jx: 0.03, jy: 1.14, min: -2.5, max: 0.05, thick: 0.09, color: SKIN },
 
-    { name: "thighBack", x: -0.06, y: 0.68, w: 0.115, h: 0.4, shape: "capsule", density: 175, parent: "pelvis", jx: -0.06, jy: 0.88, min: -1.5, max: 1.9, thick: 0.13, color: "#2b303c" },
-    { name: "shinBack", x: -0.06, y: 0.29, w: 0.1, h: 0.38, shape: "capsule", density: 145, parent: "thighBack", jx: -0.06, jy: 0.48, min: -0.05, max: 2.5, thick: 0.11, color: "#2b303c" },
-    { name: "footBack", x: 0.01, y: 0.05, w: 0.26, h: 0.1, density: 110, parent: "shinBack", jx: -0.06, jy: 0.1, min: -0.6, max: 0.75, thick: 0.1, color: "#2b303c" },
+    { name: "thighBack", x: -0.06, y: 0.68, w: 0.115, h: 0.4, shape: "capsule", density: 175, parent: "pelvis", jx: -0.06, jy: 0.88, min: -1.5, max: 1.9, thick: 0.13, color: SKIN },
+    { name: "shinBack", x: -0.06, y: 0.29, w: 0.1, h: 0.38, shape: "capsule", density: 145, parent: "thighBack", jx: -0.06, jy: 0.48, min: -0.05, max: 2.5, thick: 0.11, color: SKIN },
+    { name: "footBack", x: 0.01, y: 0.05, w: 0.26, h: 0.1, density: 110, parent: "shinBack", jx: -0.06, jy: 0.1, min: -0.6, max: 0.75, thick: 0.1, color: SKIN },
 
     { name: "thighFront", x: 0.06, y: 0.68, w: 0.115, h: 0.4, shape: "capsule", density: 175, parent: "pelvis", jx: 0.06, jy: 0.88, min: -1.5, max: 1.9, thick: 0.13, color: SKIN },
     { name: "shinFront", x: 0.06, y: 0.29, w: 0.1, h: 0.38, shape: "capsule", density: 145, parent: "thighFront", jx: 0.06, jy: 0.48, min: -0.05, max: 2.5, thick: 0.11, color: SKIN },
@@ -542,9 +606,9 @@ export const BIPED_LITE: RagdollSpec = {
     { name: "pelvis", x: 0, y: 0.95, w: 0.24, h: 0.24, density: 260, thick: 0.16, color: SKIN },
     { name: "torso", x: 0, y: 1.29, w: 0.26, h: 0.46, density: 215, parent: "pelvis", jx: 0, jy: 1.07, min: -0.6, max: 0.6, thick: 0.19, color: SKIN },
     { name: "head", x: 0, y: 1.68, w: 0.31, h: 0.31, shape: "ball", density: 125, parent: "torso", jx: 0, jy: 1.52, min: -0.7, max: 0.7, thick: 0.31, color: SKIN },
-    { name: "armBack", x: -0.03, y: 1.16, w: 0.09, h: 0.58, shape: "capsule", density: 115, parent: "torso", jx: -0.02, jy: 1.45, min: -2.9, max: 2.9, thick: 0.1, color: "#2b303c" },
+    { name: "armBack", x: -0.03, y: 1.16, w: 0.09, h: 0.58, shape: "capsule", density: 115, parent: "torso", jx: -0.02, jy: 1.45, min: -2.9, max: 2.9, thick: 0.1, color: SKIN },
     { name: "armFront", x: 0.03, y: 1.16, w: 0.09, h: 0.58, shape: "capsule", density: 115, parent: "torso", jx: 0.02, jy: 1.45, min: -2.9, max: 2.9, thick: 0.1, color: SKIN },
-    { name: "legBack", x: -0.06, y: 0.46, w: 0.12, h: 0.78, shape: "capsule", density: 165, parent: "pelvis", jx: -0.06, jy: 0.85, min: -1.5, max: 1.6, thick: 0.13, color: "#2b303c" },
+    { name: "legBack", x: -0.06, y: 0.46, w: 0.12, h: 0.78, shape: "capsule", density: 165, parent: "pelvis", jx: -0.06, jy: 0.85, min: -1.5, max: 1.6, thick: 0.13, color: SKIN },
     { name: "legFront", x: 0.06, y: 0.46, w: 0.12, h: 0.78, shape: "capsule", density: 165, parent: "pelvis", jx: 0.06, jy: 0.85, min: -1.5, max: 1.6, thick: 0.13, color: SKIN },
   ],
 };

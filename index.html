@@ -58,10 +58,17 @@
     <canvas id="game"></canvas>
     <div id="boot">
       <h1>Stickman Ascension</h1>
-      <p>Loading physics&hellip;</p>
+      <p id="boot-msg">Loading physics&hellip;</p>
       <div class="bar"><i></i></div>
       <div class="err" id="boot-err"></div>
     </div>
+    <!--
+      CrazyGames SDK. Loaded ahead of the game module and deliberately *not* awaited:
+      `src/platform/portal.ts` polls for the global and gives up after a couple of
+      seconds, so a blocked or 404ing script costs a short delay on the portal and
+      nothing at all anywhere else. The game never depends on it being there.
+    -->
+    <script src="https://sdk.crazygames.com/crazygames-sdk-v3.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

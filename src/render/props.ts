@@ -361,6 +361,31 @@ export function drawIcon(ctx: Ctx, id: string, size: number, t: number) {
     case "nuke": drawNuke(ctx, 0.45, 0.9, t); break;
     case "blackhole": drawBlackhole(ctx, 0.9, 0.9, t); break;
     case "barrel": drawBarrel(ctx, 0.55, 0.85, t); break;
+    case "water": {
+      // A jet arcing out of a nozzle, with the droplets it breaks into.
+      ctx.strokeStyle = "#4fc3f7";
+      ctx.lineWidth = 0.13;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(-0.42, -0.1);
+      ctx.quadraticCurveTo(-0.02, 0.34, 0.34, 0.02);
+      ctx.stroke();
+      disc(ctx, 0.4, -0.14, 0.1, "#8fdcff", null);
+      disc(ctx, 0.22, -0.3, 0.07, "#8fdcff", null);
+      disc(ctx, 0.42, -0.36, 0.05, "#bfeaff", null);
+      break;
+    }
+    case "flamethrower": {
+      // A tongue of flame, drawn as nested teardrops from red core to yellow tip.
+      const flick = 1 + Math.sin(t * 9) * 0.06;
+      poly(ctx, [[-0.46, 0], [-0.1, 0.3 * flick], [0.34, 0.06], [0.02, -0.06], [-0.12, -0.3 * flick]],
+        "#e8431f", null);
+      poly(ctx, [[-0.34, 0], [-0.06, 0.19 * flick], [0.22, 0.03], [-0.02, -0.05], [-0.1, -0.19 * flick]],
+        "#ff9b2f", null);
+      poly(ctx, [[-0.22, 0], [-0.04, 0.1 * flick], [0.1, 0.01], [-0.06, -0.1 * flick]],
+        "#ffe9a8", null);
+      break;
+    }
     default:
       polyPath(ctx, [[-0.4, -0.4], [0.4, -0.4], [0.4, 0.4], [-0.4, 0.4]]);
       ctx.fillStyle = "#888";

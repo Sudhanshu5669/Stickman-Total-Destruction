@@ -5,12 +5,18 @@ import { jitterDir, muzzleSpawn } from "../entities/projectile";
 import { at, disc, poly, rgba, roundBox, shade, type Ctx } from "../render/draw";
 import { drawIcon } from "../render/props";
 import { sfx } from "../fx/audio";
+import { progress } from "../ui/progress";
 
 export interface FireResult {
   fired: boolean;
   /** Recoil impulse direction/magnitude in m/s, already pointing away from the target. */
   recoil: V;
   ammo: AmmoDef;
+  /**
+   * True for the hose and the flamethrower. Their recoil is already scaled by `dt`
+   * and arrives every frame, so the shooter must not treat it as a discrete shot.
+   */
+  streaming: boolean;
 }
 
 /**
@@ -42,13 +48,24 @@ export class Weapon {
   }
 
   /**
-   * Issues a loadout. `ids` are matched against the arsenal in the order given, so a
-   * mission controls both *what* you carry and which key each round sits on. Unknown
-   * ids are skipped; an empty result falls back to the full arsenal rather than
-   * leaving the player with no gun at all.
+   * Issues a loadout.
+   *
+   * `ids` are matched against the arsenal in the order given, so a mission controls
+   * both *what* you carry and which key each round sits on. Unknown ids are skipped.
+   *
+   * With no list, you carry what you have **earned** — see `progress.ARSENAL`. That is
+   * the difference between a game that shows you everything in the first thirty
+   * seconds and one that keeps handing you something new. Campaign missions pass an
+   * explicit list and so ignore unlocks entirely: a mission is authored around its
+   * toys, and being told to clear it without them would be a worse experience than
+   * being handed a round you had not bought yet.
+   *
+   * An empty result falls back to the full arsenal rather than leaving the player
+   * with no gun at all — a corrupt save should not be unplayable.
    */
   setLoadout(ids: readonly string[] | null | undefined) {
-    const picked = ids?.map((id) => AMMO_BY_ID.get(id)).filter((a): a is AmmoDef => !!a) ?? [];
+    const wanted = ids ?? progress.unlockedWeapons();
+    const picked = wanted.map((id) => AMMO_BY_ID.get(id)).filter((a): a is AmmoDef => !!a);
     this.list = picked.length ? picked : AMMO;
     this.index = 0;
     this.cooldown = 0;
@@ -93,10 +110,14 @@ export class Weapon {
    * @param aim     Unit vector toward the crosshair.
    * @param facing  Which way the shooter is turned, for creature ammo orientation.
    */
-  fire(game: GameCtx, origin: V, aim: V, facing: 1 | -1, triggerHeld: boolean, triggerPressed: boolean): FireResult {
+  fire(
+    game: GameCtx, origin: V, aim: V, facing: 1 | -1,
+    triggerHeld: boolean, triggerPressed: boolean, dt: number,
+  ): FireResult {
     const a = this.ammo;
-    const none: FireResult = { fired: false, recoil: v(0, 0), ammo: a };
+    const none: FireResult = { fired: false, recoil: v(0, 0), ammo: a, streaming: false };
 
+    if (a.stream) return this.streamFire(game, a, origin, aim, facing, triggerHeld || triggerPressed, dt, none);
     if (this.cooldown > 0) return none;
     // Auto weapons also honour `pressed`: a click shorter than one frame would
     // otherwise be swallowed entirely, which feels broken on fast mice.
@@ -117,7 +138,7 @@ export class Weapon {
     const dir = norm(aim);
     const spawnAt = muzzleSpawn(origin, dir, a.muzzle);
 
-    for (let i = 0; i < a.count; i++) {
+    for (let i = 0; i < a.count && a.spawn; i++) {
       const d = a.spread > 0 ? jitterDir(dir, a.spread) : dir;
       const speed = speedFor(a);
       const vel = v(d.x * speed, d.y * speed);
@@ -138,8 +159,43 @@ export class Weapon {
     game.particles.sparks(spawnAt.x, spawnAt.y, Math.round(4 + a.heft * 16), 6 + a.heft * 14, "#ffd23f");
     game.particles.smoke(spawnAt.x, spawnAt.y, Math.round(2 + a.heft * 8), 1.5, "#8d95a3");
 
-    return { fired: true, recoil: v(-dir.x * a.recoil, -dir.y * a.recoil), ammo: a };
+    return { fired: true, recoil: v(-dir.x * a.recoil, -dir.y * a.recoil), ammo: a, streaming: false };
   }
+
+  /**
+   * The continuous path: a hose, not a gun.
+   *
+   * There is no cooldown, no reserve and no per-shot presentation — the sim on the
+   * other end of `stream` owns everything visible. What the weapon still owns is the
+   * feel: a steady backward push (dt-scaled, so it is a force rather than a kick)
+   * and a barrel that stays warm and shaking while the trigger is down.
+   */
+  private streamFire(
+    game: GameCtx, a: AmmoDef, origin: V, aim: V, facing: 1 | -1,
+    held: boolean, dt: number, none: FireResult,
+  ): FireResult {
+    if (!held) {
+      this.streamHeat = Math.max(0, this.streamHeat - dt * 3);
+      return none;
+    }
+    this.streamHeat = Math.min(1, this.streamHeat + dt * 5);
+    const dir = norm(aim);
+    const spawnAt = muzzleSpawn(origin, dir, a.muzzle);
+    a.stream!(game, spawnAt, dir, dt, facing);
+
+    this.kick = Math.max(this.kick, 0.3 + Math.random() * 0.12);
+    this.flash = Math.max(this.flash, 0.35);
+    game.camera.addTrauma(dt * 0.35);
+    return {
+      fired: true,
+      recoil: v(-dir.x * a.recoil * dt, -dir.y * a.recoil * dt),
+      ammo: a,
+      streaming: true,
+    };
+  }
+
+  /** 0..1 while a continuous weapon is running; drives the nozzle glow. */
+  streamHeat = 0;
 
   /** Draws the gun in world space, rotated to `angle` and pivoted at the hand. */
   draw(ctx: Ctx, hand: V, angle: number, time: number) {
@@ -173,6 +229,21 @@ export class Weapon {
       ], shade(a.tint, -0.15), "#171b23", 0.045);
       ctx.restore();
 
+      // Continuous weapons carry their reservoir on the receiver and end in a wide
+      // cone rather than a bore — you can tell what you are holding at a glance.
+      if (a.nozzle) {
+        disc(ctx, -len * 0.3, 0.2, 0.17, shade(a.tint, -0.35), "#171b23", 0.04);
+        disc(ctx, -len * 0.12, 0.22, 0.14, shade(a.tint, -0.45), "#171b23", 0.04);
+        const glow = this.streamHeat;
+        poly(ctx, [
+          [len * 0.7, -barrelR * 1.1], [len * 0.98, -barrelR * 2.4],
+          [len * 0.98, barrelR * 2.4], [len * 0.7, barrelR * 1.1],
+        ], shade(a.tint, -0.1), "#171b23", 0.045);
+        if (glow > 0.02) {
+          disc(ctx, len * 0.98, 0, (0.12 + glow * 0.16), rgba(a.tint, 0.35 + glow * 0.5), null);
+        }
+      }
+
       // Ammo indicator drum on the side of the receiver.
       disc(ctx, -0.05, 0.14, 0.1, "#232a36", "#171b23", 0.035);
       ctx.save();
@@ -197,6 +268,9 @@ export class Weapon {
 
   /** Little smoke curl from the barrel between shots. */
   emitIdleSmoke(game: GameCtx, hand: V, angle: number, dt: number) {
+    // The hose and the flamethrower produce their own effects continuously; a puff of
+    // gunsmoke on top of a jet of water makes no sense.
+    if (this.ammo.stream) return;
     if (this.kick < 0.25 || Math.random() > dt * 22) return;
     const len = 1.3 + this.ammo.heft;
     game.particles.smoke(hand.x + Math.cos(angle) * len, hand.y + Math.sin(angle) * len, 1, 1.1, "#9aa3b0");

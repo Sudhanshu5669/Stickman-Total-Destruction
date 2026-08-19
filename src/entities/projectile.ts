@@ -5,6 +5,7 @@ import { clamp, norm, rand, randSign, v, type V } from "../core/math";
 import { at, type Ctx } from "../render/draw";
 import type { PropDraw } from "../render/props";
 import { sfx } from "../fx/audio";
+import { bleed, bloodBurst, bloodPool, severLimbs } from "../fx/gore";
 
 export type TrailKind = "none" | "smoke" | "fire" | "feather" | "sparkle" | "void";
 export type ImpactSound = "thud" | "ricochet" | "splat" | "piano" | "saw" | "metal" | "glass" | "none";
@@ -309,6 +310,8 @@ export class RigidProjectile implements Actor, PhysOwner {
       g.particles.ring(p.x, p.y, 1.5, "#ffffff", 1.1);
       g.particles.ring(p.x, p.y, 0.8, "#ffd08a", 0.9);
       g.particles.fire(p.x, p.y, 220, 34);
+      // Real flame gas, not just a particle burst: whatever it washes over catches.
+      g.fire.burst(p.x, p.y, 160, 26, 1);
       g.particles.smoke(p.x, p.y, 150, 16, "#4b4f59");
       for (let i = 0; i < 60; i++) {
         g.particles.smoke(p.x + rand(-3, 3), p.y + i * 0.55, 2, 5, "#6a6f7b");
@@ -322,6 +325,7 @@ export class RigidProjectile implements Actor, PhysOwner {
       g.particles.flash(p.x, p.y, e.radius * 0.5);
       g.particles.ring(p.x, p.y, 0.5, "#ffd08a", 0.4);
       g.particles.fire(p.x, p.y, Math.round(34 * scale), 10 * scale);
+      g.fire.burst(p.x, p.y, Math.round(22 * scale), 9 * scale, 0.95);
       g.particles.smoke(p.x, p.y, Math.round(20 * scale), 4 * scale);
       g.particles.sparks(p.x, p.y, Math.round(20 * scale), 12, "#ffd23f");
       sfx.explode(scale);
@@ -407,15 +411,20 @@ export class CreatureProjectile implements Actor {
     this.ragdoll.splatColor = cfg.splatColor;
     this.ragdoll.onDeath = () => this.onDeath();
     this.ragdoll.onHurt = (_r, amt, at_) => {
-      if (amt > 8) game.particles.blood(at_.x, at_.y, Math.min(18, Math.round(amt / 3)), undefined, 7, cfg.splatColor);
+      if (amt > 8) bloodBurst(game, at_, undefined, amt * 0.5, cfg.splatColor);
     };
 
     cfg.voice?.();
   }
 
   private onDeath() {
-    const c = this.ragdoll.center();
-    this.game.particles.blood(c.x, c.y, 26, undefined, 11, this.cfg.splatColor);
+    const r = this.ragdoll;
+    const c = r.center();
+    // Fired creatures die on impact, so this is nearly always a hard landing: the
+    // same force rule as everything else decides how much of it is left.
+    const cut = severLimbs(this.game, r, r.lastDamage);
+    bloodBurst(this.game, c, undefined, 30 + cut * 14, this.cfg.splatColor);
+    bloodPool(this.game, c, rand(0.6, 1.2) + cut * 0.3, this.cfg.splatColor);
     this.game.particles.stars(c.x, c.y, 6);
     this.game.award(this.cfg.points, c, `+${this.cfg.points}`);
     sfx.splat();
@@ -440,6 +449,8 @@ export class CreatureProjectile implements Actor {
       if (this.age > 45) this.dead = true;
       return;
     }
+
+    bleed(this.game, r, dt);
 
     if (!r.dead) {
       this.voiceTimer -= dt;

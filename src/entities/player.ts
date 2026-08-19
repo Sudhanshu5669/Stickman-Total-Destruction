@@ -181,6 +181,9 @@ export class Player implements Actor {
     // The fridge freezes everything it touches; being flash-frozen and one-shot by
     // your own round would just be a fast way to lose a run.
     this.ragdoll.freezable = false;
+    // You can absolutely set yourself on fire with your own flamethrower — but the
+    // backdraft off a wall you are standing next to should not do it instantly.
+    this.ragdoll.flammability = 0.3;
     this.ragdoll.invulnerable = true;
     this.ragdoll.onHurt = (_r, amount, at) => this.onHurt(amount, at);
     this.ragdoll.onDeath = () => this.onDeath();
@@ -262,19 +265,19 @@ export class Player implements Actor {
   }
 
   private get wantCrouch() {
-    return this.control ? this.control.crouch : this.input.held("KeyS", "ArrowDown");
+    return this.control ? this.control.crouch : this.input.crouchHeld();
   }
 
   /** Edge-consuming: returns true once per request. */
   private takeJump() {
-    if (!this.control) return this.input.pressed("Space", "KeyW", "ArrowUp");
+    if (!this.control) return this.input.jumpPressed();
     const j = this.control.jumpPressed;
     this.control.jumpPressed = false;
     return j;
   }
 
   private get wantJumpHeld() {
-    return this.control ? this.control.jumpHeld : this.input.held("Space", "KeyW", "ArrowUp");
+    return this.control ? this.control.jumpHeld : this.input.jumpHeld();
   }
 
   private get wantFireHeld() {
@@ -303,7 +306,7 @@ export class Player implements Actor {
     if (!this.control) {
       const back = this.input.pressed("Digit1", "Numpad1", "KeyQ") ? 1 : 0;
       const fwd = this.input.pressed("Digit3", "Numpad3", "KeyE") ? 1 : 0;
-      return this.input.wheel + fwd - back;
+      return this.input.wheel + fwd - back + this.input.virtualCycle;
     }
     const c = this.control.cycleAmmo;
     this.control.cycleAmmo = 0;
@@ -506,8 +509,12 @@ export class Player implements Actor {
 
     const hand = this.hand;
     const dir = v(Math.cos(this.aimAngle), Math.sin(this.aimAngle));
-    const res = w.fire(this.game, hand, dir, this.facing, held, pressed);
-    if (res.fired) {
+    const res = w.fire(this.game, hand, dir, this.facing, held, pressed, dt);
+    if (res.streaming) {
+      // A hose pushes you; it does not kick you. The recoil already carries dt, so it
+      // is applied straight through with none of the launch/knockdown machinery.
+      this.ragdoll.applyImpulse(v(res.recoil.x, res.recoil.y));
+    } else if (res.fired) {
       const t = TUNE.recoilTransfer;
       this.ragdoll.applyImpulse(v(res.recoil.x * t, res.recoil.y * t));
       // A little extra straight into the arm so the gun visibly bucks.
@@ -866,9 +873,23 @@ export class Player implements Actor {
   drawTrajectory(ctx: Ctx) {
     if (!this.controllable) return;
     const a = this.weapon.ammo;
-    const gravity = -26 * (a.id === "rocket" || a.id === "plane" || a.id === "blackhole" ? 0.3 : 1);
     const dir = v(Math.cos(this.aimAngle), Math.sin(this.aimAngle));
     const hand = this.hand;
+    // A jet has no arc worth previewing — show the spray cone it will actually cover.
+    if (a.stream) {
+      const base = Math.atan2(dir.y, dir.x);
+      ctx.strokeStyle = rgba(a.tint, 0.28);
+      ctx.lineWidth = 0.05;
+      ctx.lineCap = "round";
+      for (const s of [-a.spread, a.spread]) {
+        ctx.beginPath();
+        ctx.moveTo(hand.x + Math.cos(base + s) * a.muzzle, hand.y + Math.sin(base + s) * a.muzzle);
+        ctx.lineTo(hand.x + Math.cos(base + s) * 9, hand.y + Math.sin(base + s) * 9);
+        ctx.stroke();
+      }
+      return;
+    }
+    const gravity = -26 * (a.id === "rocket" || a.id === "plane" || a.id === "blackhole" ? 0.3 : 1);
     let px = hand.x + dir.x * a.muzzle;
     let py = hand.y + dir.y * a.muzzle;
     let vx = dir.x * a.speed;

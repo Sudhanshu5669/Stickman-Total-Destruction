@@ -214,6 +214,32 @@ export class Sfx {
     this.tone({ freq: 220, to: 46, dur: 0.2, gain: 0.16, type: "sine" });
   }
 
+  /** A limb coming off — wetter and lower than a splat, with a bone snap on top. */
+  gib() {
+    if (!this.budget(2)) return;
+    this.noise({ dur: 0.34, gain: 0.34, freq: 900, sweepTo: 80, q: 0.5 });
+    this.tone({ freq: 150, to: 34, dur: 0.3, gain: 0.2, type: "sine" });
+    this.tone({ freq: rand(900, 1500), to: 300, dur: 0.05, gain: 0.1, type: "square" });
+  }
+
+  /** Something catching light: a short, soft whump. */
+  ignite() {
+    if (!this.budget()) return;
+    this.noise({ dur: 0.35, gain: 0.16, freq: 300, sweepTo: 900, q: 0.9, type: "bandpass", attack: 0.05 });
+  }
+
+  /** Water hitting fire. */
+  steam() {
+    if (!this.budget()) return;
+    this.noise({ dur: rand(0.6, 1.2), gain: 0.11, freq: 4200, q: 0.8, type: "highpass", attack: 0.05 });
+  }
+
+  /** Water hitting anything else. */
+  splash(strength = 1) {
+    if (!this.budget()) return;
+    this.noise({ dur: 0.24 * strength, gain: 0.1 * strength, freq: 1800, sweepTo: 600, q: 0.7, type: "bandpass" });
+  }
+
   ricochet() {
     if (!this.budget()) return;
     const f = rand(1400, 3200);
@@ -324,6 +350,77 @@ export class Sfx {
     this.jetGain.gain.setTargetAtTime(t <= 0.001 ? 0.0001 : 0.05 + t * 0.13, now, 0.04);
     this.jetFilter!.frequency.setTargetAtTime(600 + t * 1900, now, 0.06);
     this.jetTone!.frequency.setTargetAtTime(62 + t * 46, now, 0.08);
+  }
+
+  /**
+   * The two continuous weapon loops. Both follow the jetpack's pattern: one noise
+   * source built lazily on first use and then only automated, because scheduling a
+   * fresh voice every frame at 60 fps is what turns a sound engine into a crackle.
+   */
+  private loop(
+    which: "hose" | "flame",
+    level: number,
+    build: () => { gain: GainNode; filter: BiquadFilterNode },
+    tune: (g: GainNode, f: BiquadFilterNode, t: number, now: number) => void,
+  ) {
+    if (!this.ctx) return;
+    const t = clamp(level, 0, 1);
+    let node = this.loops[which];
+    if (!node) {
+      if (t <= 0.001) return;
+      node = this.loops[which] = build();
+    }
+    tune(node.gain, node.filter, t, this.t);
+  }
+
+  private loops: Partial<Record<"hose" | "flame", { gain: GainNode; filter: BiquadFilterNode }>> = {};
+
+  /** Pressurised water: broadband hiss with a hollow, rushing band on top. */
+  hose(level: number) {
+    this.loop("hose", level, () => {
+      const c = this.ctx!;
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const filter = c.createBiquadFilter();
+      filter.type = "bandpass";
+      filter.frequency.value = 2400;
+      filter.Q.value = 0.7;
+      const gain = c.createGain();
+      gain.gain.value = 0.0001;
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      src.start();
+      return { gain, filter };
+    }, (g, f, t, now) => {
+      g.gain.setTargetAtTime(t <= 0.001 ? 0.0001 : 0.04 + t * 0.12, now, 0.05);
+      f.frequency.setTargetAtTime(1600 + t * 2200, now, 0.08);
+    });
+  }
+
+  /** Burning gas: a low roar, not a hiss. */
+  flamethrower(level: number) {
+    this.loop("flame", level, () => {
+      const c = this.ctx!;
+      const src = c.createBufferSource();
+      src.buffer = this.noiseBuf;
+      src.loop = true;
+      const filter = c.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 900;
+      filter.Q.value = 1.6;
+      const gain = c.createGain();
+      gain.gain.value = 0.0001;
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.master);
+      src.start();
+      return { gain, filter };
+    }, (g, f, t, now) => {
+      g.gain.setTargetAtTime(t <= 0.001 ? 0.0001 : 0.05 + t * 0.16, now, 0.05);
+      f.frequency.setTargetAtTime(420 + t * 1100, now, 0.07);
+    });
   }
 
   /** Corrosive rain on stone — a wet sizzle, not a splash. */

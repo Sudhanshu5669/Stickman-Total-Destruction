@@ -14,8 +14,12 @@ function fail(err: unknown) {
 async function start() {
   if (!canvas) throw new Error("canvas #game missing");
 
+  const t0 = performance.now();
   const game = new Game(canvas);
   await game.init();
+  // Portals rank on engagement and players bounce on slow loads, so the one number
+  // worth keeping an eye on goes in the console rather than in a profiler session.
+  console.info(`[boot] ready in ${Math.round(performance.now() - t0)}ms`);
 
   // Browsers only allow audio after a real gesture, so arm it on the first input.
   const unlock = () => sfx.unlock();

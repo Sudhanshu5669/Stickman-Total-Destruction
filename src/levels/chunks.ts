@@ -395,9 +395,134 @@ for (const [w, h] of [[4, 6], [6, 9]] as const) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Dense districts
+//
+// The chunks above are set-pieces with air around them: one tower, one yard, one
+// gate, each sitting in the middle of its own span. Read end to end they give a run
+// that breathes, but they also give a *sparse* skyline — you are never inside a city,
+// only walking past one building at a time.
+//
+// These pack the same span at roughly half the pitch. A skyline chunk puts three
+// towers across 40m; a district puts five or six across 34m, with the gaps filled by
+// low-rise and the roofs occupied. They are the top of the tier ladder because the
+// collapse of one genuinely takes the next two with it.
+// ---------------------------------------------------------------------------
+
+const DISTRICT_KITS: [string, MaterialId, MaterialId][] = [
+  ["downtown", "concrete", "metal"],
+  ["oldtown", "brick", "concrete"],
+  ["industrial", "hull", "metal"],
+  ["glasshouse", "concrete", "hull"],
+];
+
+for (const [name, mat, slab] of DISTRICT_KITS) {
+  // Two densities of the same block: a low-rise grid and a proper high-rise wall.
+  for (const [tag, pitch, base, step, tier] of [
+    ["lowrise", 6.2, 4, 1, 2],
+    ["highrise", 6.2, 9, 2, 3],
+  ] as const) {
+    // 42m wide with the outermost tower ending 4m short of the edge — the margin the
+    // director's packing overlap eats into, sized so it can never run out.
+    def(`district-${name}-${tag}`, 42, tier, (b, x, g) => {
+      // Six towers at a pitch tight enough that a toppling one reaches its neighbour.
+      for (let i = 0; i < 6; i++) {
+        const floors = base + ((i * step + i * i) % 5);
+        b.tower({
+          x: x + 5 + i * pitch,
+          baseY: g,
+          floors,
+          width: 3.6 + (i % 2) * 0.5,
+          material: mat,
+          slab,
+          windows: true,
+          guards: i % 2 === 0 ? ["grunt"] : ["guard"],
+          goldTop: floors >= base + 3,
+        });
+      }
+      // Street level: barrels between the feet, so the ground floor is the fuse.
+      b.explosiveStack(x + 5 + pitch * 0.5, g, 4);
+      b.explosiveStack(x + 5 + pitch * 2.5, g, 4);
+      b.scatter(x + 20, g, 10, 14, ["wood", "explosive", "glass"]);
+      b.enemy("guard", x + 34, g, -1, { behavior: "hunter", gun: "smg", range: 30, standoff: 12, spread: 0.12 });
+    });
+  }
+
+  // The same block with the upper floors tied together, so it comes down as one piece.
+  def(`district-${name}-linked`, 36, 3, (b, x, g) => {
+    const pitch = 7.4;
+    for (let i = 0; i < 4; i++) {
+      b.tower({
+        x: x + 6 + i * pitch, baseY: g, floors: 8 + (i % 3) * 3, width: 4.4,
+        material: mat, slab, windows: true, guards: ["guard", "grunt"], goldTop: i === 2,
+      });
+    }
+    // Catwalks at two heights, staggered, so the whole district is one structure.
+    for (let i = 0; i < 3; i++) {
+      const y = g + FLOOR_PITCH * (4 + (i % 2) * 3) + 0.18;
+      b.catwalk(x + 8.4 + i * pitch, x + 11.6 + i * pitch, y);
+    }
+    b.enemy("guard", x + 14, g + FLOOR_PITCH * 4 + 0.4, -1,
+      { behavior: "sentry", gun: "sniper", range: 70, interval: 2.4, spread: 0.04 });
+    b.enemy("boss", x + 22, g, -1, { behavior: "hunter", gun: "rifle", range: 36, standoff: 14, spread: 0.09 });
+    b.explosiveStack(x + 10, g, 5);
+  });
+}
+
+// Terraced street: continuous low-rise with no gaps at all, the densest thing here.
+for (const [mat, roof, len] of [
+  ["brick", "wood", 5],
+  ["concrete", "brick", 6],
+  ["sandstone", "concrete", 5],
+] as [MaterialId, MaterialId, number][]) {
+  def(`terrace-row-${mat}-${len}`, len * 6 + 6, 1, (b, x, g) => {
+    for (let i = 0; i < len; i++) {
+      const hx = x + 5 + i * 6;
+      b.house({ x: hx, baseY: g, w: 5.6, h: 3.4 + (i % 3) * 0.6, material: mat, roof });
+      if (i % 2 === 0) b.enemy(i % 4 === 0 ? "guard" : "grunt", hx, g + 4.2, -1, { behavior: "sentry", gun: "rifle", range: 30, spread: 0.12 });
+    }
+    b.scatter(x + len * 3, g, 6, len * 2.4, ["wood", "explosive"]);
+  });
+}
+
+// A stacked shelf of towers on a plinth — density in the vertical, too.
+for (const mat of ["concrete", "hull", "brick"] as MaterialId[]) {
+  def(`tiered-${mat}`, 30, 3, (b, x, g) => {
+    b.wall(x + 15, g, 22, 2.6, mat, 0.8);
+    const top = g + 2.6;
+    for (let i = 0; i < 4; i++) {
+      b.tower({
+        x: x + 7 + i * 5.4, baseY: top, floors: 5 + ((i + 1) % 3) * 3, width: 3.6,
+        material: mat, slab: "metal", windows: true, guards: ["grunt"], goldTop: i === 1,
+      });
+    }
+    b.enemy("guard", x + 4, g, 1, { behavior: "patrol", patrol: 3, gun: "shotgun", range: 16 });
+    b.enemy("guard", x + 26, g, -1, { behavior: "patrol", patrol: 3, gun: "smg", range: 26, spread: 0.14 });
+    b.explosiveStack(x + 15, g, 3);
+  });
+}
+
 export { CHUNKS };
 
 /** Chunks legal at a given difficulty tier. Precomputed — the director asks per spawn. */
 export const CHUNKS_BY_TIER: readonly (readonly Chunk[])[] = [0, 1, 2, 3].map(
   (t) => CHUNKS.filter((c) => c.tier <= t),
 );
+
+/**
+ * How often a chunk should come up relative to its peers.
+ *
+ * A flat shuffle deals empty clearings as often as city blocks, and since there are
+ * only a handful of clearings but they are the widest chunks in the deck, that put a
+ * disproportionate amount of *nothing* on screen. Weighting is the cheapest way to
+ * make the world denser without touching a single authored layout: the same set-pieces
+ * appear, packed closer together in the sequence.
+ */
+export function chunkWeight(c: Chunk): number {
+  if (c.id.startsWith("clearing")) return 1;
+  if (c.id.startsWith("district") || c.id.startsWith("tiered") || c.id.startsWith("terrace-row")) return 14;
+  if (c.id.startsWith("skyline") || c.id.startsWith("citadel") || c.id.startsWith("twins")) return 7;
+  if (c.id.startsWith("tower") || c.id.startsWith("keep") || c.id.startsWith("hamlet")) return 4;
+  if (c.id.startsWith("yard") || c.id.startsWith("patrol") || c.id.startsWith("crystals")) return 1;
+  return 2;
+}

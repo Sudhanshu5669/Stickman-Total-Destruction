@@ -1,8 +1,12 @@
 import { Camera } from "./core/camera";
 import { Input } from "./core/input";
-import { Physics, type ImpactEvent } from "./core/physics";
+import { Physics, type ImpactEvent, type PhysOwner } from "./core/physics";
 import type { Actor, GameCtx } from "./core/types";
 import { Particles } from "./fx/particles";
+import { Decals, anchorAt, canMark } from "./fx/decals";
+import { WaterSim } from "./fx/fluid";
+import { FireSim } from "./fx/fire";
+import { SolidField } from "./fx/solids";
 import { sfx } from "./fx/audio";
 import { Background } from "./render/background";
 import { THEMES, type Theme } from "./render/theme";
@@ -12,10 +16,13 @@ import { Enemy, alertNearby } from "./entities/enemy";
 import { Block, Debris } from "./entities/block";
 import { Hud, type HudState } from "./ui/hud";
 import { Menu, type MenuAction } from "./ui/menu";
-import { progress } from "./ui/progress";
+import { previousCost, progress } from "./ui/progress";
+import { TouchControls } from "./ui/touch";
+import { portal } from "./platform/portal";
+import type { ResultCard } from "./ui/menu";
 import { DemoDriver } from "./ai/demo";
 import { Builder } from "./levels/builder";
-import { CAMPAIGN, LEVELS, levelById } from "./levels";
+import { CAMPAIGN, DAILY, LEVELS, levelById } from "./levels";
 import type { LevelDef, LevelInfo, LevelKind } from "./levels/types";
 import { clamp, damp, lerp, rand, v, type V } from "./core/math";
 import { Bullet } from "./entities/bullet";
@@ -42,6 +49,14 @@ export class Game implements GameCtx {
   readonly input: Input;
   readonly camera = new Camera();
   readonly particles = new Particles();
+  readonly decals = new Decals();
+  readonly water = new WaterSim();
+  readonly fire = new FireSim(this);
+  /**
+   * One shared snapshot of nearby collision geometry, rebuilt once per physics step
+   * and read by both particle sims. See `SolidField` for why it exists.
+   */
+  private readonly solids = new SolidField();
   readonly hud = new Hud();
   readonly menu = new Menu();
   readonly background = new Background();
@@ -95,6 +110,19 @@ export class Game implements GameCtx {
   private comboMax = 0;
   blocksDestroyed = 0;
 
+  /** On-screen controls; inert until a real touch arrives. */
+  readonly touch: TouchControls;
+
+  // ------------------------------------------------------------- run bookkeeping
+  /** Carnage banked when this run ended, and what it bought. */
+  private earned = 0;
+  private unlockedThisRun: string[] = [];
+  /** Leaderboard placing, filled in asynchronously after a run ends. */
+  private rank: number | null = null;
+  /** One revive per run, and only when a portal is actually there to pay for it. */
+  private reviveUsed = false;
+  private reviving = false;
+
   paused = false;
   showDebug = false;
   /** Session-level cheat: kept across respawns, restarts and level changes. */
@@ -108,13 +136,27 @@ export class Game implements GameCtx {
     if (!ctx) throw new Error("2D canvas context unavailable");
     this.ctx = ctx;
     this.input = new Input(canvas);
+    this.touch = new TouchControls(canvas, this.input);
+    if (TouchControls.shouldEnable()) this.input.touchMode = true;
   }
 
   // ------------------------------------------------------------------ setup
 
   async init() {
+    // Tell the portal we are loading *before* the 2MB physics blob, and that we are
+    // done once the first world exists — this bracket is what it uses to decide when
+    // it may run its own pre-roll, and a missing one is a common submission rejection.
+    //
+    // Detection runs alongside the physics load rather than before it. Off-portal
+    // there is no SDK to find, and making every itch/dev/standalone boot sit through
+    // that timeout before it even starts loading would be paying the portal's cost
+    // everywhere except the portal.
+    portal.loadingStart();
+    const detected = portal.init();
     await Physics.load();
+    await detected;
     this.enterMenu();
+    portal.loadingStop();
     this.running = true;
     this.lastFrame = performance.now();
     requestAnimationFrame(this.frame);
@@ -130,12 +172,19 @@ export class Game implements GameCtx {
     this.pending.length = 0;
     this.damageList.length = 0;
     this.particles.clear();
+    this.decals.clear();
+    this.water.clear();
+    this.fire.clear();
+    // These hold owners from the world about to be thrown away.
+    this.wet.clear();
 
     this.levelDef = def;
     this.theme = THEMES[def.theme] ?? THEMES.day;
     this.physics = new Physics(def.gravity);
     // Falling debris should float on a low-gravity world too.
     this.particles.gravityScale = def.gravity / BASE_GRAVITY;
+    // Water falls under the world's own gravity, so Mars pours in slow motion.
+    this.water.gravity = def.gravity;
 
     const builder = new Builder(this, this.theme);
     this.level = def.build(this, builder);
@@ -181,11 +230,43 @@ export class Game implements GameCtx {
    * menu mid-run still counts. `recordDistance` only ever moves the record forward,
    * making a double call from `finish()` harmless.
    */
+  /**
+   * Pays whatever the current run has earned into the permanent record.
+   *
+   * Called on every exit from a run — the result card, quitting to the menu, and
+   * starting anything else — because a run does not have to *end* to have counted.
+   * The playground has no win or lose condition at all, so if banking only happened
+   * on `finish()` the one mode built for grinding the arsenal would be the one mode
+   * that never paid out.
+   *
+   * Banking is by delta rather than by total, which is what makes it safe to call
+   * repeatedly: a revive banks on death, keeps playing, and banks only the difference
+   * at the real end instead of charging the first half of the run twice.
+   */
   private bankRun() {
-    if (this.mode !== "playing" || this.runKind !== "endless") return;
+    if (this.mode !== "playing") return;
+
+    const delta = Math.floor(this.score) - this.bankedScore;
+    if (delta > 0) {
+      this.bankedScore = Math.floor(this.score);
+      this.earned = this.bankedScore;
+      this.unlockedThisRun.push(...progress.addCarnage(delta));
+    }
+
+    if (this.runKind !== "endless") return;
     const d = this.level?.director;
-    if (d) progress.recordDistance(d.distance);
+    if (!d) return;
+    if (this.levelDef === DAILY) {
+      progress.recordDaily(this.score, d.distance);
+      portal.submitScore("daily", this.score);
+    } else {
+      progress.recordDistance(d.distance);
+      portal.submitScore("distance", Math.floor(d.distance));
+    }
   }
+
+  /** Score already paid into carnage this run, so banking twice cannot double-charge. */
+  private bankedScore = 0;
 
   /** Starts a level for the player. */
   startLevel(def: LevelDef) {
@@ -199,7 +280,14 @@ export class Game implements GameCtx {
     this.wasDown = false;
     this.livesLeft = def.lives ?? 3;
     this.bestDistance = progress.bestDistance;
+    this.earned = 0;
+    this.bankedScore = 0;
+    this.unlockedThisRun = [];
+    this.rank = null;
+    this.reviveUsed = false;
+    this.reviving = false;
     this.loadLevel(def);
+    portal.gameplayStart();
     this.player.control = null;
     this.canvas.style.cursor = "none";
     // The click that pressed PLAY must not also pull the trigger on frame one.
@@ -217,6 +305,8 @@ export class Game implements GameCtx {
   /** Returns to the start menu, where the selected world plays itself. */
   enterMenu() {
     this.bankRun();
+    portal.gameplayStop();
+    this.touch.release();
     this.mode = "menu";
     this.runKind = "playground";
     this.outcome = null;
@@ -232,9 +322,39 @@ export class Game implements GameCtx {
     this.canvas.style.cursor = "default";
   }
 
+  /**
+   * Replays the current level.
+   *
+   * The interstitial lives here rather than on death, and it is awaited before the
+   * rebuild so the ad never plays over a live world. Dying and pressing the button
+   * again is the impulse the whole mode runs on; putting a commercial in the middle
+   * of it is the most reliable way to end a session instead of extending it.
+   */
   restart() {
-    this.startLevel(this.levelDef);
+    if (this.restarting) return;
+    this.restarting = true;
+    const def = this.levelDef;
+    this.adBreak()
+      .then(() => this.startLevel(def))
+      .finally(() => {
+        this.restarting = false;
+      });
   }
+
+  /** Latched across the ad await, so a held key cannot queue two level loads. */
+  private restarting = false;
+
+  /** Shows an interstitial if one is due. Resolves immediately when it is not. */
+  private async adBreak() {
+    this.restartsSinceAd++;
+    if (!portal.available || this.restartsSinceAd < 3) return;
+    this.restartsSinceAd = 0;
+    portal.gameplayStop();
+    await portal.midgame();
+  }
+
+  /** Restarts since the last interstitial — one every third try, not every try. */
+  private restartsSinceAd = 0;
 
   reset() {
     if (this.mode === "menu") this.enterMenu();
@@ -338,6 +458,9 @@ export class Game implements GameCtx {
     this.fps = lerp(this.fps, rawDt > 0 ? 1 / rawDt : 60, 0.1);
 
     this.resize();
+    // Thumbs are read before anything consumes input, so a touch and the step that
+    // acts on it land on the same frame — same contract as the keyboard.
+    this.touch.update(rawDt);
     this.handleFrameKeys();
 
     this.menu.lastMouse.x = this.input.mouse.x;
@@ -474,22 +597,105 @@ export class Game implements GameCtx {
   private finish(outcome: Outcome) {
     this.outcome = outcome;
     this.canvas.style.cursor = "default";
+    this.touch.release();
+    portal.gameplayStop();
+
     if (outcome === "won") {
       if (this.runKind === "campaign") progress.clear(this.levelDef.order ?? 0);
       sfx.levelUp();
+      portal.happytime();
     } else {
       sfx.ui(false);
     }
-    if (this.runKind === "endless") {
-      const d = this.level.director;
-      if (d) progress.recordDistance(d.distance);
+
+    const before = this.unlockedThisRun.length;
+    this.bankRun();
+    if (this.unlockedThisRun.length > before) {
+      sfx.levelUp();
+      portal.happytime();
     }
+    if (this.runKind === "endless") void this.fetchRank(this.levelDef === DAILY ? "daily" : "distance");
   }
 
-  /** The stats block on the result card, per mode. */
-  private resultCard() {
+  /**
+   * Asks the portal where this run placed.
+   *
+   * Fired and forgotten on purpose — the results card renders immediately without it
+   * and picks the rank up on a later frame if it arrives. A leaderboard having a bad
+   * day must never be something the player can feel.
+   */
+  private async fetchRank(board: string) {
+    const entry = await portal.rank(board);
+    if (entry && this.outcome) this.rank = entry.rank;
+  }
+
+  /** True while a revive is a real offer: endless only, once, and only on a portal. */
+  private get canRevive() {
+    return this.outcome === "lost" && this.runKind === "endless"
+      && !this.reviveUsed && !this.reviving && portal.available;
+  }
+
+  /**
+   * Trades an ad for the run the player just lost.
+   *
+   * Offered rather than forced, and only on the run they were most invested in —
+   * this is the one interruption a player reliably *wants*, which is why it is the
+   * only rewarded placement in the game.
+   */
+  private async revive() {
+    if (!this.canRevive) return;
+    this.reviving = true;
+    const result = await portal.rewarded();
+    this.reviving = false;
+    if (result !== "watched") {
+      // Nothing to show or nothing watched: leave the card exactly as it was, minus
+      // the offer, so a broken ad slot cannot strand the player on a dead screen.
+      this.reviveUsed = true;
+      return;
+    }
+
+    this.reviveUsed = true;
+    this.outcome = null;
+    this.rank = null;
+    this.wasDown = false;
+    this.livesLeft = 1;
+    this.canvas.style.cursor = "none";
+
+    // Landing back in the middle of whatever killed you would be a swindle: clear the
+    // immediate area, put the player back on their feet, and hand back the carnage
+    // that was banked on death so the run keeps accumulating into one score.
+    const p = this.player.pos;
+    for (const e of this.level.enemies) {
+      if (!e.ragdoll.dead && Math.abs(e.pos.x - p.x) < 22) e.ragdoll.takeDamage(1e6, e.pos);
+    }
+    this.player.respawn(v(p.x, p.y + 3));
+    this.flash(0.5, "#ffd23f");
+    this.camera.addTrauma(0.3);
+    this.input.consumeEdges();
+    portal.gameplayStart();
+  }
+
+  /** The end-of-run overlay, per mode. */
+  private resultCard(): ResultCard {
     const d = this.level.director;
     const won = this.outcome === "won";
+    const next = progress.nextUnlock();
+    const meta = {
+      earned: this.earned,
+      carnage: progress.carnage,
+      unlocked: this.unlockedThisRun,
+      next: next
+        ? {
+            id: next.id,
+            remaining: Math.max(0, next.cost - next.have),
+            // Measured from the previous rung, not from zero — a bar that creeps a
+            // pixel per run tells the player nothing about how close they are.
+            frac: (next.have - previousCost(next.cost)) / Math.max(1, next.cost - previousCost(next.cost)),
+          }
+        : null,
+      rank: this.rank,
+      canRevive: this.canRevive,
+    };
     const stats: [string, string][] = [
       ["SCORE", this.score.toLocaleString("en-US")],
       ["BEST CHAIN", `x${this.comboMax}`],
@@ -500,23 +706,28 @@ export class Game implements GameCtx {
     if (this.runKind === "endless") {
       stats.unshift(["DISTANCE", `${Math.floor(d?.distance ?? 0)}m`]);
       stats.splice(1, 0, ["HOSTILES DOWN", `${this.kills}`]);
+      const daily = this.levelDef === DAILY;
       return {
+        ...meta,
         won: false,
-        title: "RUN OVER",
+        title: daily ? "DAILY COMPLETE" : "RUN OVER",
         // Compared against the record as it stood when this run started — `finish`
         // has already banked the new one by the time this card is built.
-        subtitle: (d?.distance ?? 0) > this.bestDistance
-          ? "A new furthest run."
-          : `Furthest run so far: ${Math.floor(this.bestDistance)}m.`,
+        subtitle: daily
+          ? "Same world for everybody today. Come back tomorrow for a new one."
+          : (d?.distance ?? 0) > this.bestDistance
+            ? "A new furthest run."
+            : `Furthest run so far: ${Math.floor(this.bestDistance)}m.`,
         stats,
         hasNext: false,
-        retryLabel: "RUN AGAIN",
+        retryLabel: daily ? "REPLAY TODAY" : "RUN AGAIN",
       };
     }
 
     stats.unshift(["HOSTILES DOWN", `${this.level.enemies.length - this.aliveEnemies()}/${this.level.enemies.length}`]);
     const last = CAMPAIGN.indexOf(this.levelDef) === CAMPAIGN.length - 1;
     return {
+      ...meta,
       won,
       title: won ? "MISSION COMPLETE" : "MISSION FAILED",
       subtitle: won
@@ -546,9 +757,62 @@ export class Game implements GameCtx {
       if (!a.dead) a.update(dt);
     }
 
+    this.stepElements(dt);
     this.clampPlayerToBounds();
     this.reapAndCap();
   }
+
+  /**
+   * Water, fire and the marks they leave.
+   *
+   * Order matters. The solid snapshot is taken after the rigid step so both sims see
+   * where the world actually is this frame; water runs before fire so a jet aimed
+   * into a blaze has already arrived when the flames look for something to boil; and
+   * the accumulated fluid pressure is flushed into the rigid bodies at the end, to be
+   * integrated by the *next* physics step.
+   */
+  private stepElements(dt: number) {
+    const cam = this.camera.pos;
+    const busy = this.water.count > 0 || this.fire.count > 0;
+    if (busy) this.solids.rebuild(this.physics, cam.x, cam.y, 78, 78);
+
+    this.water.update(dt, this.solids, cam.x, cam.y, this.soak);
+    this.fire.update(dt, this.solids, this.water, cam.x, cam.y);
+    if (busy) this.solids.flush();
+
+    // Soaking dries out on its own, so a doused building becomes flammable again.
+    for (const o of this.wet) {
+      const next = (o.soaked ?? 0) - dt * 0.12;
+      if (next <= 0) {
+        o.soaked = 0;
+        this.wet.delete(o);
+      } else {
+        o.soaked = next;
+      }
+    }
+    this.decals.update(dt);
+  }
+
+  /** Everything currently carrying water, so it can be dried off over time. */
+  private readonly wet = new Set<PhysOwner>();
+
+  /**
+   * One droplet landed on something. Bound once rather than allocated per frame —
+   * the fluid solver calls this thousands of times a second.
+   */
+  private soak = (owner: PhysOwner, x: number, y: number, solid: number) => {
+    // Wet patches go on surfaces only, and ride the block they landed on — a splash
+    // mark left behind by a stickman who walked off is a mark floating in mid-air.
+    if (Math.random() < 0.004 && canMark(owner)) {
+      this.decals.wet(x, y, rand(0.3, 0.8), anchorAt(owner, this.solids.bodies[solid], x, y));
+      sfx.splash(0.5);
+    }
+    // Only things that can burn need tracking; the ground stays wet-looking either way.
+    if (owner.flammability === undefined) return;
+    owner.soaked = Math.min(1.5, (owner.soaked ?? 0) + 0.06);
+    this.wet.add(owner);
+    this.fire.douse(owner, 0.06);
+  };
 
   private flushPending() {
     if (!this.pending.length) return;
@@ -653,9 +917,14 @@ export class Game implements GameCtx {
 
   /** Frame-rate controls: pause, and menu navigation keys. */
   private handleFrameKeys() {
-    if (this.mode === "playing" && !this.outcome && this.input.pressed("KeyP", "Escape")) {
+    // An ad owns the screen; the game must not react to anything behind it.
+    if (portal.adPlaying) return;
+    const pause = this.input.pressed("KeyP", "Escape") || this.touch.pausePressed;
+    this.touch.pausePressed = false;
+    if (this.mode === "playing" && !this.outcome && pause) {
       this.paused = !this.paused;
       this.canvas.style.cursor = this.paused ? "default" : "none";
+      if (this.paused) this.touch.release();
       sfx.ui(!this.paused);
       this.input.consumeEdges();
     }
@@ -722,9 +991,15 @@ export class Game implements GameCtx {
 
   /** Buttons on the mission-complete / run-over card. */
   private handleResultInput() {
+    // An ad is on screen; the card underneath must not react to anything.
+    if (this.reviving || portal.adPlaying) return;
+
     if (this.input.pressed("Enter", "NumpadEnter", "Space")) {
-      const card = this.resultCard();
-      if (card.hasNext) this.nextMission();
+      // One key, and it always does the most valuable thing available: take the
+      // revive if there is one, otherwise carry on. The retry has to be reachable
+      // without hunting for a button.
+      if (this.canRevive) void this.revive();
+      else if (this.resultCard().hasNext) this.nextMission();
       else this.restart();
       return;
     }
@@ -738,6 +1013,9 @@ export class Game implements GameCtx {
     }
     const a = this.menu.click(this.input.mouse.x, this.input.mouse.y);
     switch (a.kind) {
+      case "revive":
+        void this.revive();
+        break;
       case "next":
         this.nextMission();
         break;
@@ -855,8 +1133,13 @@ export class Game implements GameCtx {
     }
     this.drawList.sort((x, y) => (x.z ?? 10) - (y.z ?? 10));
 
+    // Marks sit under everything: blood is on the floor, not on the characters.
+    this.decals.draw(ctx);
     for (const a of this.drawList) a.draw(ctx);
     this.particles.draw(ctx);
+    this.water.draw(ctx);
+    // Flames last and additive, so they light everything they are in front of.
+    this.fire.draw(ctx);
     if (this.mode === "playing") this.player.drawTrajectory(ctx);
     ctx.restore();
 
@@ -892,6 +1175,7 @@ export class Game implements GameCtx {
       this.player.weapon.ammo.tint,
       this.player.weapon.cooldownFrac,
     );
+    this.touch.draw(ctx, w, h, true);
   }
 
   private hudState(): HudState {

@@ -1,9 +1,12 @@
-import { CAMPAIGN, ENDLESS, PLAYGROUND } from "../levels";
+import { CAMPAIGN, DAILY, ENDLESS, PLAYGROUND } from "../levels";
 import type { LevelDef } from "../levels/types";
 import { THEMES } from "../render/theme";
 import { clamp, hash01, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
-import { progress } from "./progress";
+import { ARSENAL, previousCost, progress } from "./progress";
+import { AMMO_BY_ID } from "../weapons/ammo";
+import { secondsUntilRollover } from "../core/rng";
+import { iconBitmap } from "../render/props";
 
 const CREAM = "#f4f1e8";
 const GOLD = "#ffd23f";
@@ -21,6 +24,7 @@ export type MenuAction =
   | { kind: "restart" }
   | { kind: "quit" }
   | { kind: "next" }
+  | { kind: "revive" }
   | { kind: "mute" };
 
 interface Region {
@@ -28,6 +32,27 @@ interface Region {
   action: MenuAction;
   /** Drawn dimmed and un-clickable — a campaign mission you haven't unlocked. */
   locked?: boolean;
+}
+
+/** Everything the end-of-run overlay needs. Built by the game, drawn here. */
+export interface ResultCard {
+  won: boolean;
+  title: string;
+  subtitle: string;
+  stats: [string, string][];
+  hasNext: boolean;
+  retryLabel: string;
+  /** Carnage banked by this run, and the lifetime total after banking it. */
+  earned: number;
+  carnage: number;
+  /** Rounds this run pushed over the line. Drives the unlock banner. */
+  unlocked: string[];
+  /** Progress toward the next round, or null once the arsenal is complete. */
+  next: { id: string; remaining: number; frac: number } | null;
+  /** Portal leaderboard placing, if it arrived in time. */
+  rank: number | null;
+  /** Whether the revive offer should be shown. */
+  canRevive: boolean;
 }
 
 interface ModeCard {
@@ -41,7 +66,7 @@ const MODES: ModeCard[] = [
   {
     screen: "playground",
     title: "PLAYGROUND",
-    blurb: "Four worlds, the whole arsenal, nothing shooting back. Break everything.",
+    blurb: "Four worlds, nothing shooting back. The place you go to earn the rest of the arsenal.",
     accent: "#ffd23f",
   },
   {
@@ -53,7 +78,7 @@ const MODES: ModeCard[] = [
   {
     screen: "endless",
     title: "ENDLESS",
-    blurb: "A world dealt from hundreds of set-pieces. Walk until it kills you.",
+    blurb: "Endless runs and a daily challenge everyone plays the same.",
     accent: "#8a5cff",
   },
 ];
@@ -87,7 +112,7 @@ export class Menu {
     switch (this.screen) {
       case "playground": return PLAYGROUND;
       case "campaign": return CAMPAIGN;
-      case "endless": return [ENDLESS];
+      case "endless": return [ENDLESS, DAILY];
       default: return PLAYGROUND;
     }
   }
@@ -241,13 +266,70 @@ export class Menu {
       this.drawModeCard(ctx, m, x, y, cardW, cardH, k, lift, i === this.selected);
     });
 
-    const footY = h - 30 * k;
-    text(ctx, "← →  choose mode     ENTER  open     M  sound", w / 2, footY - 20 * k,
+    this.drawArsenalBar(ctx, w, h * 0.78, k);
+
+    const footY = h - 26 * k;
+    text(ctx, "← →  choose mode     ENTER  open     M  sound", w / 2, footY - 18 * k,
       13 * k, "rgba(244,241,232,0.42)", "center", "middle", 700);
     const done = progress.cleared;
     const best = Math.floor(progress.bestDistance);
     text(ctx, `campaign ${done}/${CAMPAIGN.length} cleared     endless best ${best}m`,
       w / 2, footY, 13 * k, "rgba(244,241,232,0.3)", "center", "middle", 700);
+  }
+
+  /**
+   * The arsenal ladder, as a row of round glyphs with the locked ones dimmed and the
+   * next one called out by name and price.
+   *
+   * This is the single most important thing on the front end: it is the answer to
+   * "why would I press play again", and it has to be visible before the player has
+   * decided. Showing the locked rounds rather than hiding them is the whole point —
+   * you cannot want something you do not know exists.
+   */
+  private drawArsenalBar(ctx: Ctx, w: number, y: number, k: number) {
+    const carnage = progress.carnage;
+    const cell = Math.min(30 * k, (w - 120 * k) / ARSENAL.length);
+    const totalW = ARSENAL.length * cell;
+    const x0 = w / 2 - totalW / 2;
+
+    ARSENAL.forEach(([id, cost], i) => {
+      const owned = carnage >= cost;
+      const cx = x0 + i * cell + cell / 2;
+      ctx.save();
+      ctx.globalAlpha = owned ? 1 : 0.24;
+      const glyph = iconBitmap(id);
+      const gs = cell * 0.88;
+      ctx.drawImage(glyph, cx - gs / 2, y - gs / 2, gs, gs);
+      ctx.restore();
+      if (!owned) {
+        ctx.fillStyle = "rgba(10,12,18,0.45)";
+        ctx.beginPath();
+        ctx.arc(cx, y, cell * 0.42, 0, TAU);
+        ctx.fill();
+        drawPadlock(ctx, cx, y, cell * 0.24);
+      }
+    });
+
+    const next = progress.nextUnlock();
+    if (!next) {
+      text(ctx, "ARSENAL COMPLETE", w / 2, y + cell * 0.9, 12 * k, GOLD, "center", "middle", 900);
+      return;
+    }
+    // A bar from the previous unlock to the next, so progress is visible per-round
+    // rather than as a fraction of a number nobody has a feel for.
+    const prev = previousCost(next.cost);
+    const frac = clamp((carnage - prev) / Math.max(1, next.cost - prev), 0, 1);
+    const bw = Math.min(300 * k, w - 140 * k);
+    const bx = w / 2 - bw / 2;
+    const by = y + cell * 0.78;
+    ctx.fillStyle = "rgba(0,0,0,0.4)";
+    roundRect(ctx, bx, by, bw, 6 * k, 3 * k);
+    ctx.fill();
+    ctx.fillStyle = GOLD;
+    roundRect(ctx, bx, by, bw * frac, 6 * k, 3 * k);
+    ctx.fill();
+    text(ctx, `NEXT: ${weaponName(next.id)} — ${(next.cost - carnage).toLocaleString("en-US")} MORE CARNAGE`,
+      w / 2, by + 18 * k, 12 * k, "rgba(244,241,232,0.62)", "center", "middle", 800);
   }
 
   private drawModeCard(
@@ -412,21 +494,44 @@ export class Menu {
 
   private drawEndless(ctx: Ctx, w: number, h: number, k: number) {
     this.drawHeader(ctx, w, h, k, "ENDLESS",
-      "Hundreds of authored set-pieces, dealt at random. It does not stop.");
+      "Run until it kills you — or take today's world, the same one everybody gets.");
 
-    const cardW = Math.min(420 * k, w - 120 * k);
-    const cardH = cardW * 0.5;
-    const x = w / 2 - cardW / 2;
-    const y = h * 0.34;
-    this.regions.push({ x, y, w: cardW, h: cardH, action: { kind: "select", level: ENDLESS } });
-    this.drawLevelCard(ctx, ENDLESS, x, y, cardW, cardH, k, this.lift[0] ?? 1, true);
+    const list = this.options;
+    const cardW = Math.min(340 * k, (w - 100 * k) / 2 - 14 * k);
+    const cardH = cardW * 0.56;
+    const gap = 22 * k;
+    const startX = (w - (list.length * cardW + (list.length - 1) * gap)) / 2;
+    const y = h * 0.3;
 
-    const best = Math.floor(progress.bestDistance);
-    text(ctx, best > 0 ? `${best}m` : "—", w / 2, y + cardH + 42 * k, 40 * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.7)");
-    text(ctx, "FURTHEST RUN", w / 2, y + cardH + 72 * k, 12 * k, "rgba(244,241,232,0.5)", "center", "middle", 800);
+    list.forEach((def, i) => {
+      const x = startX + i * (cardW + gap);
+      const lift = this.lift[i] ?? 0;
+      const cy = y - lift * 8 * k;
+      this.regions.push({ x, y: cy, w: cardW, h: cardH, action: { kind: "select", level: def } });
+      if (this.regionHovered(x, cy, cardW, cardH)) this.hovered = i;
+      this.drawLevelCard(ctx, def, x, cy, cardW, cardH, k, lift, i === this.selected);
 
-    this.drawPlayButton(ctx, w, y + cardH + 92 * k, k, "START RUN", ENDLESS);
-    this.drawFooter(ctx, w, h, k, "ENTER  start     ESC  back");
+      // Each card carries its own record underneath it.
+      const sy = cy + cardH + 30 * k;
+      if (def === DAILY) {
+        const today = progress.daily;
+        text(ctx, today ? today.score.toLocaleString("en-US") : "NOT PLAYED",
+          x + cardW / 2, sy, today ? 30 * k : 18 * k, today ? GOLD : "rgba(244,241,232,0.4)",
+          "center", "middle", 900, "rgba(0,0,0,0.7)");
+        text(ctx, today ? "TODAY'S SCORE" : "ONE WORLD, EVERYONE, TODAY",
+          x + cardW / 2, sy + 24 * k, 11 * k, "rgba(244,241,232,0.5)", "center", "middle", 800);
+        text(ctx, `RESETS IN ${countdown(secondsUntilRollover())}`,
+          x + cardW / 2, sy + 42 * k, 11 * k, "rgba(255,210,63,0.7)", "center", "middle", 800);
+      } else {
+        const best = Math.floor(progress.bestDistance);
+        text(ctx, best > 0 ? `${best}m` : "—", x + cardW / 2, sy, 30 * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.7)");
+        text(ctx, "FURTHEST RUN", x + cardW / 2, sy + 24 * k, 11 * k, "rgba(244,241,232,0.5)", "center", "middle", 800);
+      }
+    });
+
+    this.drawPlayButton(ctx, w, y + cardH + 96 * k, k,
+      this.level === DAILY ? "PLAY TODAY'S RUN" : "START RUN", this.level);
+    this.drawFooter(ctx, w, h, k, "← →  choose     ENTER  start     ESC  back");
   }
 
   // ---------------------------------------------------------------- shared bits
@@ -590,39 +695,105 @@ export class Menu {
    * end of an endless run — they differ only in the headline and which buttons make
    * sense afterwards.
    */
-  drawResult(
-    ctx: Ctx, w: number, h: number,
-    r: {
-      won: boolean; title: string; subtitle: string;
-      stats: [string, string][]; hasNext: boolean; retryLabel: string;
-    },
-  ) {
+  drawResult(ctx: Ctx, w: number, h: number, r: ResultCard) {
     this.regions = [];
     const k = clamp(Math.min(w / 1280, h / 760), 0.5, 1.25);
 
-    ctx.fillStyle = r.won ? "rgba(8,16,12,0.82)" : "rgba(20,8,10,0.82)";
+    ctx.fillStyle = r.won ? "rgba(8,16,12,0.9)" : "rgba(20,8,10,0.9)";
     ctx.fillRect(0, 0, w, h);
 
-    const top = h * 0.2;
-    text(ctx, r.title, w / 2, top, 58 * k, r.won ? "#6ddc7a" : "#e8433a", "center", "middle", 900, "rgba(0,0,0,0.75)");
-    text(ctx, r.subtitle, w / 2, top + 44 * k, 16 * k, "rgba(244,241,232,0.7)", "center", "middle", 700);
+    // An unlock outranks the result. Dying is routine; earning the flamethrower is not,
+    // and it is the thing most likely to buy another run.
+    const top = h * (r.unlocked.length ? 0.13 : 0.2);
+    text(ctx, r.title, w / 2, top, 52 * k, r.won ? "#6ddc7a" : "#e8433a", "center", "middle", 900, "rgba(0,0,0,0.75)");
+    text(ctx, r.subtitle, w / 2, top + 40 * k, 15 * k, "rgba(244,241,232,0.7)", "center", "middle", 700);
+
+    let sy = top + 76 * k;
+    if (r.unlocked.length) sy = this.drawUnlocks(ctx, w, sy, k, r.unlocked);
 
     // Stat rows.
-    let sy = top + 84 * k;
     const sw = 320 * k;
     for (const [label, value] of r.stats) {
-      text(ctx, label, w / 2 - sw / 2, sy, 14 * k, "rgba(244,241,232,0.55)", "left", "middle", 700);
-      text(ctx, value, w / 2 + sw / 2, sy, 16 * k, CREAM, "right", "middle", 900);
+      text(ctx, label, w / 2 - sw / 2, sy, 13 * k, "rgba(244,241,232,0.55)", "left", "middle", 700);
+      text(ctx, value, w / 2 + sw / 2, sy, 15 * k, CREAM, "right", "middle", 900);
       ctx.fillStyle = "rgba(255,255,255,0.07)";
-      ctx.fillRect(w / 2 - sw / 2, sy + 12 * k, sw, 1 * k);
-      sy += 28 * k;
+      ctx.fillRect(w / 2 - sw / 2, sy + 11 * k, sw, 1 * k);
+      sy += 26 * k;
     }
 
+    if (r.rank) {
+      text(ctx, `WORLD RANK  #${r.rank.toLocaleString("en-US")}`, w / 2, sy + 8 * k,
+        16 * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.6)");
+      sy += 30 * k;
+    }
+
+    sy = this.drawCarnageBar(ctx, w, sy + 10 * k, k, r);
+
     const buttons: { label: string; action: MenuAction; primary?: boolean }[] = [];
-    if (r.hasNext) buttons.push({ label: "NEXT MISSION", action: { kind: "next" }, primary: true });
-    buttons.push({ label: r.retryLabel, action: { kind: "restart" }, primary: !r.hasNext });
+    // The revive sits on top and is the only thing tinted, because it is the offer.
+    if (r.canRevive) buttons.push({ label: "▸  CONTINUE RUN (AD)", action: { kind: "revive" }, primary: true });
+    if (r.hasNext) buttons.push({ label: "NEXT MISSION", action: { kind: "next" }, primary: !r.canRevive });
+    buttons.push({ label: r.retryLabel, action: { kind: "restart" }, primary: !r.hasNext && !r.canRevive });
     buttons.push({ label: "MAIN MENU", action: { kind: "quit" } });
-    this.drawButtonStack(ctx, w, sy + 16 * k, k, buttons);
+    this.drawButtonStack(ctx, w, sy + 12 * k, k, buttons);
+
+    text(ctx, "SPACE  " + (r.canRevive ? "continue" : "again") + "     ESC  menu", w / 2, h - 22 * k,
+      12 * k, "rgba(244,241,232,0.32)", "center", "middle", 700);
+  }
+
+  /** The "you earned something" banner. Returns the Y to carry on drawing from. */
+  private drawUnlocks(ctx: Ctx, w: number, y: number, k: number, ids: string[]) {
+    const pulse = 0.55 + 0.45 * Math.sin(this.t * 5);
+    const gs = 44 * k;
+    const gap = 12 * k;
+    const totalW = ids.length * gs + (ids.length - 1) * gap;
+    const bw = Math.min(w - 60 * k, totalW + 60 * k);
+    const bh = gs + 58 * k;
+    const bx = w / 2 - bw / 2;
+
+    ctx.fillStyle = "rgba(255,210,63,0.1)";
+    roundRect(ctx, bx, y, bw, bh, 12 * k);
+    ctx.fill();
+    ctx.strokeStyle = rgbaHex(GOLD, 0.35 + pulse * 0.5);
+    ctx.lineWidth = 2 * k;
+    ctx.stroke();
+
+    text(ctx, ids.length > 1 ? `${ids.length} NEW ROUNDS UNLOCKED` : "NEW ROUND UNLOCKED",
+      w / 2, y + 20 * k, 15 * k, GOLD, "center", "middle", 900);
+
+    const x0 = w / 2 - totalW / 2;
+    ids.forEach((id, i) => {
+      ctx.drawImage(iconBitmap(id), x0 + i * (gs + gap), y + 32 * k, gs, gs);
+    });
+    text(ctx, ids.map(weaponName).join("   ·   "), w / 2, y + bh - 14 * k,
+      13 * k, CREAM, "center", "middle", 900);
+    return y + bh + 18 * k;
+  }
+
+  /** Carnage banked this run, and how much further the next round is. */
+  private drawCarnageBar(ctx: Ctx, w: number, y: number, k: number, r: ResultCard) {
+    const bw = Math.min(340 * k, w - 80 * k);
+    const bx = w / 2 - bw / 2;
+
+    text(ctx, `+${r.earned.toLocaleString("en-US")} CARNAGE`, bx, y, 14 * k, GOLD, "left", "middle", 900);
+    text(ctx, r.carnage.toLocaleString("en-US") + " TOTAL", bx + bw, y, 12 * k,
+      "rgba(244,241,232,0.5)", "right", "middle", 800);
+
+    if (!r.next) {
+      text(ctx, "ARSENAL COMPLETE", w / 2, y + 22 * k, 12 * k, GOLD, "center", "middle", 900);
+      return y + 34 * k;
+    }
+    const by = y + 14 * k;
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    roundRect(ctx, bx, by, bw, 8 * k, 4 * k);
+    ctx.fill();
+    ctx.fillStyle = GOLD;
+    roundRect(ctx, bx, by, bw * clamp(r.next.frac, 0, 1), 8 * k, 4 * k);
+    ctx.fill();
+    ctx.drawImage(iconBitmap(r.next.id), bx + bw - 8 * k, by - 9 * k, 26 * k, 26 * k);
+    text(ctx, `${weaponName(r.next.id)} in ${r.next.remaining.toLocaleString("en-US")}`,
+      bx, by + 24 * k, 12 * k, "rgba(244,241,232,0.62)", "left", "middle", 800);
+    return by + 36 * k;
   }
 
   private drawButtonStack(
@@ -890,6 +1061,25 @@ function drawMiniStickman(g: Ctx, x: number, groundY: number, s: number) {
 }
 
 // ------------------------------------------------------------------ primitives
+
+/** Display name for an ammo id, straight off the arsenal definition. */
+function weaponName(id: string): string {
+  return AMMO_BY_ID.get(id)?.name.toUpperCase() ?? id.toUpperCase();
+}
+
+/** `H:MM:SS` for the daily rollover clock. */
+function countdown(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  return `${hh}h ${String(mm).padStart(2, "0")}m`;
+}
+
+/** `#rrggbb` + alpha, for the few places that animate a stroke colour. */
+function rgbaHex(hex: string, alpha: number) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+}
 
 function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
