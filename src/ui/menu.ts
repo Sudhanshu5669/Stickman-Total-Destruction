@@ -4,6 +4,7 @@ import { THEMES } from "../render/theme";
 import { clamp, hash01, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
 import { ARSENAL, previousCost, progress } from "./progress";
+import { SHAKE_LABELS, settings } from "./settings";
 import { AMMO_BY_ID } from "../weapons/ammo";
 import { secondsUntilRollover } from "../core/rng";
 import { iconBitmap } from "../render/props";
@@ -13,6 +14,20 @@ const GOLD = "#ffd23f";
 
 /** Which page of the front end is on screen. */
 export type Screen = "root" | "playground" | "campaign" | "endless";
+
+/**
+ * Things the menu handles entirely by itself.
+ *
+ * Options are settings, not navigation: nothing outside this file needs to know that
+ * the shake slider was dragged, and routing them through the game would mean four new
+ * cases in three different input handlers for state the menu already owns. `click()`
+ * applies them and reports `none`, so every existing call site keeps working.
+ */
+type UiAction =
+  | { ui: "options" }
+  | { ui: "close" }
+  | { ui: "shake"; step: number }
+  | { ui: "tips" };
 
 export type MenuAction =
   | { kind: "none" }
@@ -25,7 +40,8 @@ export type MenuAction =
   | { kind: "quit" }
   | { kind: "next" }
   | { kind: "revive" }
-  | { kind: "mute" };
+  | { kind: "mute" }
+  | ({ kind: "ui" } & UiAction);
 
 interface Region {
   x: number; y: number; w: number; h: number;
@@ -53,35 +69,76 @@ export interface ResultCard {
   rank: number | null;
   /** Whether the revive offer should be shown. */
   canRevive: boolean;
+  /**
+   * A record this run broke, e.g. `NEW FURTHEST RUN`. Optional: the card falls back to
+   * the subtitle, so leaving it unset costs nothing.
+   */
+  record?: string;
+  /** Name of the mission the NEXT button leads to, so the button can say where it goes. */
+  nextLabel?: string;
 }
 
+/**
+ * The three things the front page offers beyond the PLAY button.
+ *
+ * Each one is a *shortcut* first and a menu second: the body of the card launches the
+ * obvious thing — the next mission, an endless run — and the strip along its bottom
+ * opens the picker for players who want to choose. A returning player reaches the mode
+ * they came back for in one click; a browsing player reaches the full list in one more.
+ */
 interface ModeCard {
   screen: Screen;
   title: string;
-  blurb: string;
   accent: string;
+  /** Second line: whatever number tells this player where they are in this mode. */
+  status(): string;
+  /** The picker strip's label, or null when the card only ever opens a list. */
+  browse: string | null;
+  /** What the card body launches, or null when the body opens the picker instead. */
+  quick(): LevelDef | null;
+}
+
+/** The next mission the player has not cleared, or the last one once they all are. */
+function nextMission(): LevelDef {
+  const done = progress.cleared;
+  return CAMPAIGN[clamp(done, 0, CAMPAIGN.length - 1)];
 }
 
 const MODES: ModeCard[] = [
   {
-    screen: "playground",
-    title: "PLAYGROUND",
-    blurb: "Four worlds, nothing shooting back. The place you go to earn the rest of the arsenal.",
-    accent: "#ffd23f",
-  },
-  {
     screen: "campaign",
     title: "CAMPAIGN",
-    blurb: "Six missions of armed stickmen. Fixed loadout, limited lives, no god mode.",
     accent: "#e8433a",
+    status: () => {
+      const m = nextMission();
+      return progress.cleared >= CAMPAIGN.length ? "ALL CLEAR" : `MISSION ${m.order} · ${m.name.toUpperCase()}`;
+    },
+    browse: "ALL MISSIONS",
+    quick: nextMission,
   },
   {
     screen: "endless",
     title: "ENDLESS",
-    blurb: "Endless runs and a daily challenge everyone plays the same.",
     accent: "#8a5cff",
+    status: () => {
+      const best = Math.floor(progress.bestDistance);
+      return best > 0 ? `BEST ${best}m` : "RUN UNTIL IT KILLS YOU";
+    },
+    browse: "DAILY CHALLENGE",
+    quick: () => ENDLESS,
+  },
+  {
+    screen: "playground",
+    title: "WORLDS",
+    accent: "#5ec8ff",
+    status: () => `${PLAYGROUND.length} SANDBOXES · NOTHING SHOOTS BACK`,
+    browse: null,
+    quick: () => null,
   },
 ];
+
+/** What the PLAY button drops you into. The one world built to teach the arsenal. */
+const QUICK_PLAY = PLAYGROUND[0];
 
 /**
  * The front end: mode select, its three sub-screens, and the pause overlay.
@@ -102,6 +159,8 @@ export class Menu {
   private t = 0;
   /** Per-card hover/selection lift, smoothed. Indexed by position on the current screen. */
   private lift: number[] = [];
+  /** The options panel, drawn over whatever is underneath and swallowing its clicks. */
+  private optionsOpen = false;
 
   lastMouse = { x: -1, y: -1 };
 
@@ -117,8 +176,9 @@ export class Menu {
     }
   }
 
+  /** Root holds PLAY plus one card per mode; every other screen holds its own list. */
   private get count() {
-    return this.screen === "root" ? MODES.length : this.options.length;
+    return this.screen === "root" ? MODES.length + 1 : this.options.length;
   }
 
   get selected() {
@@ -127,7 +187,13 @@ export class Menu {
 
   /** The level to launch — and the world the attract demo shows behind the menu. */
   get level(): LevelDef {
-    if (this.screen === "root") return PLAYGROUND[clamp(this.sel.root, 0, PLAYGROUND.length - 1)];
+    if (this.screen === "root") {
+      const i = this.selected;
+      if (i === 0) return QUICK_PLAY;
+      // Arrowing across the front page tours the worlds behind it: each card previews
+      // whatever it would drop you into.
+      return MODES[i - 1].quick() ?? PLAYGROUND[clamp(this.sel.playground, 0, PLAYGROUND.length - 1)];
+    }
     const list = this.options;
     return list[clamp(this.sel[this.screen], 0, list.length - 1)];
   }
@@ -149,8 +215,12 @@ export class Menu {
     this.lift = [];
   }
 
-  /** Escape / back: a sub-screen returns to mode select. */
+  /** Escape / back: options close first, then a sub-screen returns to the front page. */
   back(): boolean {
+    if (this.optionsOpen) {
+      this.optionsOpen = false;
+      return true;
+    }
     if (this.screen === "root") return false;
     this.goTo("root");
     return true;
@@ -172,12 +242,40 @@ export class Menu {
     this.sel[this.screen] = (this.selected + delta + n) % n;
   }
 
-  /** What ENTER does on the current screen. */
+  /**
+   * What ENTER does on the current screen.
+   *
+   * On the front page it always *plays* — PLAY, the next mission, an endless run.
+   * Nothing on that screen is a door into another menu, because the one requirement
+   * the portal states outright is that a new player lands in gameplay immediately.
+   */
   confirm(): MenuAction {
-    if (this.screen === "root") return { kind: "screen", screen: MODES[this.selected].screen };
+    if (this.optionsOpen) {
+      this.optionsOpen = false;
+      return { kind: "none" };
+    }
+    if (this.screen === "root") {
+      const i = this.selected;
+      const quick = i === 0 ? QUICK_PLAY : MODES[i - 1].quick();
+      if (quick) return { kind: "play", level: quick };
+      return { kind: "screen", screen: MODES[i - 1].screen };
+    }
     const level = this.level;
     if (this.screen === "campaign" && !this.missionUnlocked(level)) return { kind: "none" };
     return { kind: "play", level };
+  }
+
+  /**
+   * The "show me the list instead" key on the front page — bound to the down arrow.
+   *
+   * Separate from `confirm` so the primary key never opens a menu. Returns `none`
+   * anywhere it has nothing to expand, which makes it safe to call unconditionally.
+   */
+  expand(): MenuAction {
+    if (this.screen !== "root" || this.optionsOpen) return { kind: "none" };
+    const i = this.selected;
+    if (i === 0) return { kind: "screen", screen: "playground" };
+    return { kind: "screen", screen: MODES[i - 1].screen };
   }
 
   private missionUnlocked(def: LevelDef) {
@@ -204,6 +302,11 @@ export class Menu {
     if (!r || r.locked) return { kind: "none" };
     const a = r.action;
 
+    if (a.kind === "ui") {
+      this.applyUi(a);
+      return { kind: "none" };
+    }
+
     if (a.kind === "select") {
       const idx = this.options.indexOf(a.level);
       // Second click on the already-selected card launches it.
@@ -214,11 +317,34 @@ export class Menu {
     return a;
   }
 
+  private applyUi(a: { ui: string; step?: number }) {
+    switch (a.ui) {
+      case "options": this.optionsOpen = true; break;
+      case "close": this.optionsOpen = false; break;
+      case "shake": settings.setShakeStep(a.step ?? 0); break;
+      case "tips": settings.setTips(!settings.tips); break;
+    }
+  }
+
   // ------------------------------------------------------------------ drawing
+
+  /**
+   * Scale factor for the front end.
+   *
+   * Landscape measures against both axes, which is right when the limit is usually the
+   * height. Portrait cannot: `min(w/1280, h/760)` on a 390x844 phone is driven entirely
+   * by the width and bottoms out at the floor, which produced 8px card titles. A
+   * portrait phone is measured against its width alone, against a much narrower
+   * reference, so type comes out at a size a thumb-length away from a face.
+   */
+  private scaleFor(w: number, h: number) {
+    if (w < 640) return clamp(w / 620, 0.62, 1.05);
+    return clamp(Math.min(w / 1280, h / 760), 0.5, 1.25);
+  }
 
   draw(ctx: Ctx, w: number, h: number, muted: boolean) {
     this.regions = [];
-    const k = clamp(Math.min(w / 1280, h / 760), 0.5, 1.25);
+    const k = this.scaleFor(w, h);
 
     // Scrim: dark behind the title and footer, thin across the middle so the demo
     // playing underneath stays legible — it is the reason the attract mode exists.
@@ -235,136 +361,363 @@ export class Menu {
     else if (this.screen === "campaign") this.drawCampaign(ctx, w, h, k);
     else this.drawEndless(ctx, w, h, k);
 
-    // Sound toggle, top right, on every screen.
-    const sx = w - 54 * k;
+    // Sound and options, top right, on every screen.
     const sy = 34 * k;
+    const sx = w - 54 * k;
     this.regions.push({ x: sx - 20 * k, y: sy - 20 * k, w: 40 * k, h: 40 * k, action: { kind: "mute" } });
     this.drawSpeaker(ctx, sx, sy, 15 * k, muted);
+
+    const gx = sx - 46 * k;
+    this.regions.push({ x: gx - 20 * k, y: sy - 20 * k, w: 40 * k, h: 40 * k, action: { kind: "ui", ui: "options" } });
+    drawGear(ctx, gx, sy, 14 * k, this.regionHovered(gx - 20 * k, sy - 20 * k, 40 * k, 40 * k));
+
+    // Options sit on top of whatever is underneath and take every click on the way
+    // past, so the panel cannot be clicked through into a level launch.
+    if (this.optionsOpen) {
+      this.regions = [];
+      this.drawOptions(ctx, w, h, k, muted);
+    }
+  }
+
+  // ---------------------------------------------------------------- options
+
+  /**
+   * Sound, screen shake and tips.
+   *
+   * Screen shake is here because it is an accessibility control, not a preference:
+   * this game shakes the camera on every impact and a meaningful number of players
+   * cannot tolerate that for sixty seconds. OFF is a true zero.
+   */
+  private drawOptions(ctx: Ctx, w: number, h: number, k: number, muted: boolean) {
+    ctx.fillStyle = "rgba(8,10,16,0.86)";
+    ctx.fillRect(0, 0, w, h);
+
+    const pw = Math.min(420 * k, w - 40 * k);
+    const ph = 306 * k;
+    const px = w / 2 - pw / 2;
+    const py = h / 2 - ph / 2;
+
+    ctx.fillStyle = "rgba(18,21,29,0.98)";
+    roundRect(ctx, px, py, pw, ph, 16 * k);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 1.5 * k;
+    ctx.stroke();
+
+    text(ctx, "OPTIONS", w / 2, py + 34 * k, 24 * k, CREAM, "center", "middle", 900);
+
+    const rowX = px + 24 * k;
+    const rowW = pw - 48 * k;
+    let ry = py + 76 * k;
+
+    // Screen shake, as four labelled stops rather than a drag track — a segmented
+    // control is hittable with a thumb and a mouse alike, and each stop is a word.
+    text(ctx, "SCREEN SHAKE", rowX, ry, 12 * k, "rgba(244,241,232,0.6)", "left", "middle", 800);
+    ry += 22 * k;
+    const segW = rowW / SHAKE_LABELS.length;
+    const segH = 34 * k;
+    SHAKE_LABELS.forEach((label, i) => {
+      const sxx = rowX + i * segW;
+      const on = settings.shakeStep === i;
+      const hot = this.regionHovered(sxx, ry, segW, segH);
+      this.regions.push({ x: sxx, y: ry, w: segW, h: segH, action: { kind: "ui", ui: "shake", step: i } });
+      ctx.fillStyle = on ? GOLD : hot ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)";
+      roundRect(ctx, sxx + 2 * k, ry, segW - 4 * k, segH, 7 * k);
+      ctx.fill();
+      text(ctx, label, sxx + segW / 2, ry + segH / 2 + 1 * k, 11 * k, on ? "#141820" : CREAM, "center", "middle", 900);
+    });
+    ry += segH + 30 * k;
+
+    ry = this.drawToggle(ctx, rowX, ry, rowW, k, "SOUND", !muted, { kind: "mute" });
+    ry = this.drawToggle(ctx, rowX, ry, rowW, k, "CONTROL TIPS", settings.tips, { kind: "ui", ui: "tips" });
+
+    const bw = rowW;
+    const bh = 44 * k;
+    const by = py + ph - bh - 22 * k;
+    const hot = this.regionHovered(rowX, by, bw, bh);
+    this.regions.push({ x: rowX, y: by, w: bw, h: bh, action: { kind: "ui", ui: "close" } });
+    ctx.fillStyle = hot ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.1)";
+    roundRect(ctx, rowX, by, bw, bh, 10 * k);
+    ctx.fill();
+    text(ctx, "DONE", w / 2, by + bh / 2 + 1 * k, 16 * k, CREAM, "center", "middle", 900);
+  }
+
+  /** One labelled on/off row. Returns the Y to carry on drawing from. */
+  private drawToggle(
+    ctx: Ctx, x: number, y: number, w: number, k: number,
+    label: string, on: boolean, action: MenuAction,
+  ) {
+    const tw = 62 * k;
+    const th = 30 * k;
+    const tx = x + w - tw;
+    this.regions.push({ x: tx, y, w: tw, h: th, action });
+    text(ctx, label, x, y + th / 2, 12 * k, "rgba(244,241,232,0.6)", "left", "middle", 800);
+    ctx.fillStyle = on ? GOLD : "rgba(255,255,255,0.1)";
+    roundRect(ctx, tx, y, tw, th, th / 2);
+    ctx.fill();
+    ctx.fillStyle = on ? "#141820" : "rgba(244,241,232,0.5)";
+    ctx.beginPath();
+    ctx.arc(on ? tx + tw - th / 2 : tx + th / 2, y + th / 2, th * 0.34, 0, TAU);
+    ctx.fill();
+    text(ctx, on ? "ON" : "OFF", on ? tx + th * 0.5 : tx + tw - th * 0.5, y + th / 2 + 1 * k, 10 * k,
+      on ? "#141820" : "rgba(244,241,232,0.6)", "center", "middle", 900);
+    return y + th + 20 * k;
   }
 
   // ---------------------------------------------------------------- root
 
+  /**
+   * The front page.
+   *
+   * One decision, and it is already made for you: a PLAY button large enough that no
+   * player can leave this screen without noticing it, wired straight into a world
+   * rather than into another menu. Everything else on the page is optional — the mode
+   * cards are shortcuts for people who came back for something specific, and the
+   * arsenal strip is the reason to come back at all.
+   *
+   * The old page opened on three equal cards, which made choosing a mode the first
+   * thing the game asked of somebody who had not yet seen it move.
+   */
   private drawRoot(ctx: Ctx, w: number, h: number, k: number) {
-    const titleY = h * 0.16;
-    text(ctx, "STICKMAN", w / 2, titleY, 74 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.75)");
-    text(ctx, "ASCENSION", w / 2, titleY + 62 * k, 74 * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.75)");
-    text(ctx, "a ragdoll destruction sandbox", w / 2, titleY + 108 * k, 15 * k, "rgba(244,241,232,0.55)", "center", "middle", 700);
+    const narrow = w < 640;
+    const titleY = h * 0.13;
+    const titleW = w - 56 * k;
 
-    const cardW = Math.min(300 * k, (w - 90 * k) / MODES.length - 18 * k);
-    const cardH = cardW * 0.78;
-    const gap = 22 * k;
+    // The name is the pitch. It is set in two weights so "TOTAL DESTRUCTION" is the
+    // half that carries, and auto-fitted because it is the one string on the page
+    // long enough to run off a phone.
+    fitText(ctx, "STICKMAN", w / 2, titleY, 46 * k, titleW, CREAM, 900, "rgba(0,0,0,0.75)");
+    fitText(ctx, "TOTAL DESTRUCTION", w / 2, titleY + 46 * k, 62 * k, titleW, GOLD, 900, "rgba(0,0,0,0.75)");
+    fitText(ctx, "LOAD A PIANO. AIM AT A BUILDING. PULL.", w / 2, titleY + 84 * k, 14 * k, titleW,
+      "rgba(244,241,232,0.6)", 800);
+
+    // ------------------------------------------------------------------ play
+    const playW = Math.min(460 * k, w - 56 * k);
+    const playH = (narrow ? 80 : 92) * k;
+    const playX = w / 2 - playW / 2;
+    const playLift = this.lift[0] ?? 0;
+    const playY = h * 0.36 - playLift * 4 * k;
+    this.regions.push({ x: playX, y: playY, w: playW, h: playH, action: { kind: "play", level: QUICK_PLAY } });
+    if (this.regionHovered(playX, playY, playW, playH)) this.hovered = 0;
+    this.drawPlayHero(ctx, playX, playY, playW, playH, k, this.selected === 0 || playLift > 0.4);
+
+    text(ctx, `NO MENUS. STRAIGHT INTO ${QUICK_PLAY.name.toUpperCase()}.`, w / 2, playY + playH + 18 * k,
+      12 * k, "rgba(244,241,232,0.45)", "center", "middle", 800);
+
+    // ------------------------------------------------------------------ modes
+    const gap = 14 * k;
+    const cardW = Math.min(230 * k, (w - 48 * k - gap * (MODES.length - 1)) / MODES.length);
+    const cardH = (narrow ? 88 : 78) * k;
     const totalW = MODES.length * cardW + (MODES.length - 1) * gap;
     const startX = (w - totalW) / 2;
-    const cardY = h * 0.44;
+    const cardY = playY + playH + 40 * k;
 
     MODES.forEach((m, i) => {
+      const idx = i + 1;
       const x = startX + i * (cardW + gap);
-      const lift = this.lift[i] ?? 0;
-      const y = cardY - lift * 10 * k;
-      this.regions.push({ x, y, w: cardW, h: cardH, action: { kind: "screen", screen: m.screen } });
-      if (this.regionHovered(x, y, cardW, cardH)) this.hovered = i;
-      this.drawModeCard(ctx, m, x, y, cardW, cardH, k, lift, i === this.selected);
+      const lift = this.lift[idx] ?? 0;
+      const y = cardY - lift * 5 * k;
+      const quick = m.quick();
+      // Wide: the card body launches the obvious thing and the strip along its bottom
+      // opens the picker. Narrow: there is no room to make two targets out of one card
+      // that a thumb could tell apart, and a mis-tap that launches mission 4 is a worse
+      // outcome than one that opens a list — so the whole card opens the picker.
+      const stripH = !narrow && m.browse ? 22 * k : 0;
+      const bodyH = cardH - stripH;
+      this.regions.push({
+        x, y, w: cardW, h: bodyH,
+        action: quick && !narrow ? { kind: "play", level: quick } : { kind: "screen", screen: m.screen },
+      });
+      if (stripH > 0) {
+        this.regions.push({ x, y: y + bodyH, w: cardW, h: stripH, action: { kind: "screen", screen: m.screen } });
+      }
+      if (this.regionHovered(x, y, cardW, cardH)) this.hovered = idx;
+      this.drawModeCard(ctx, m, x, y, cardW, bodyH, stripH, k, lift, idx === this.selected, narrow);
     });
 
-    this.drawArsenalBar(ctx, w, h * 0.78, k);
+    // ------------------------------------------------------------------ arsenal
+    this.drawArsenalBar(ctx, w, h - (narrow ? 108 : 116) * k, k);
 
-    const footY = h - 26 * k;
-    text(ctx, "← →  choose mode     ENTER  open     M  sound", w / 2, footY - 18 * k,
-      13 * k, "rgba(244,241,232,0.42)", "center", "middle", 700);
-    const done = progress.cleared;
-    const best = Math.floor(progress.bestDistance);
-    text(ctx, `campaign ${done}/${CAMPAIGN.length} cleared     endless best ${best}m`,
-      w / 2, footY, 13 * k, "rgba(244,241,232,0.3)", "center", "middle", 700);
+    text(ctx, narrow ? "TAP PLAY" : "ENTER  play     ↓  browse     ←  →  choose     M  sound",
+      w / 2, h - 20 * k, 12 * k, "rgba(244,241,232,0.38)", "center", "middle", 700);
   }
 
   /**
-   * The arsenal ladder, as a row of round glyphs with the locked ones dimmed and the
-   * next one called out by name and price.
+   * The gold slab both hero buttons are built on — the front page's PLAY and the
+   * results card's continue.
    *
-   * This is the single most important thing on the front end: it is the answer to
-   * "why would I press play again", and it has to be visible before the player has
-   * decided. Showing the locked rounds rather than hiding them is the whole point —
-   * you cannot want something you do not know exists.
+   * A halo that breathes, because on a portal the page is a grid of thumbnails and the
+   * player's eye arrives somewhere arbitrary; motion is what routes it here.
+   */
+  private goldSlab(ctx: Ctx, x: number, y: number, w: number, h: number, k: number, hot: boolean) {
+    const pulse = 0.5 + 0.5 * Math.sin(this.t * 2.6);
+    ctx.save();
+    ctx.shadowColor = `rgba(255,210,63,${0.3 + pulse * 0.35})`;
+    ctx.shadowBlur = (26 + pulse * 22) * k;
+    ctx.fillStyle = hot ? "#ffdf6a" : GOLD;
+    roundRect(ctx, x, y, w, h, 16 * k);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 2.5 * k;
+    roundRect(ctx, x, y, w, h, 16 * k);
+    ctx.stroke();
+  }
+
+  /** The one button the whole front end exists to get pressed. */
+  private drawPlayHero(ctx: Ctx, x: number, y: number, w: number, h: number, k: number, hot: boolean) {
+    this.goldSlab(ctx, x, y, w, h, k, hot);
+
+    const cx = x + w / 2;
+    const size = Math.min(44 * k, w * 0.16);
+    const tw = measure(ctx, "PLAY", size, 900);
+    const tri = size * 0.5;
+    const groupW = tw + tri + 18 * k;
+    const gx = cx - groupW / 2;
+
+    ctx.fillStyle = "#141820";
+    ctx.beginPath();
+    ctx.moveTo(gx, y + h / 2 - tri * 0.62);
+    ctx.lineTo(gx + tri * 0.86, y + h / 2);
+    ctx.lineTo(gx, y + h / 2 + tri * 0.62);
+    ctx.closePath();
+    ctx.fill();
+    text(ctx, "PLAY", gx + tri + 18 * k, y + h / 2 + 2 * k, size, "#141820", "left", "middle", 900);
+  }
+
+  /**
+   * The arsenal ladder, framed as what is coming rather than what is missing.
+   *
+   * This is the answer to "why would I press play again", so it has to be on screen
+   * before the player has decided — but the old version answered it by showing
+   * fourteen padlocks next to four unlocked rounds, and a wall of padlocks is a list
+   * of things you do not have. Same data, inverted: what you own reads as a
+   * collection, and exactly two locked rounds are shown, near enough to want.
+   *
+   * Everything is derived from `ARSENAL` and `progress` at draw time. No counts and no
+   * costs are written down here, so re-tuning the economy needs no change in this file.
    */
   private drawArsenalBar(ctx: Ctx, w: number, y: number, k: number) {
     const carnage = progress.carnage;
-    const cell = Math.min(30 * k, (w - 120 * k) / ARSENAL.length);
-    const totalW = ARSENAL.length * cell;
-    const x0 = w / 2 - totalW / 2;
-
-    ARSENAL.forEach(([id, cost], i) => {
-      const owned = carnage >= cost;
-      const cx = x0 + i * cell + cell / 2;
-      ctx.save();
-      ctx.globalAlpha = owned ? 1 : 0.24;
-      const glyph = iconBitmap(id);
-      const gs = cell * 0.88;
-      ctx.drawImage(glyph, cx - gs / 2, y - gs / 2, gs, gs);
-      ctx.restore();
-      if (!owned) {
-        ctx.fillStyle = "rgba(10,12,18,0.45)";
-        ctx.beginPath();
-        ctx.arc(cx, y, cell * 0.42, 0, TAU);
-        ctx.fill();
-        drawPadlock(ctx, cx, y, cell * 0.24);
-      }
-    });
-
+    const owned = ARSENAL.filter(([, cost]) => carnage >= cost).map(([id]) => id);
+    const locked = ARSENAL.filter(([, cost]) => carnage < cost);
     const next = progress.nextUnlock();
+
+    text(ctx, `ARSENAL   ${owned.length} / ${ARSENAL.length}`, w / 2, y, 11 * k,
+      "rgba(244,241,232,0.42)", "center", "middle", 800);
+
+    // Owned rounds, bright and close together so they read as a rack rather than a
+    // list. A long collection is truncated from the front — the newest toys are the
+    // ones worth showing off.
+    const cell = Math.min(28 * k, (w - 60 * k) / Math.max(8, owned.length));
+    const shown = owned.slice(-Math.max(1, Math.floor((w - 60 * k) / cell)));
+    const rowY = y + 22 * k;
+    const rowW = shown.length * cell;
+    const x0 = w / 2 - rowW / 2;
+    shown.forEach((id, i) => {
+      const gs = cell * 0.92;
+      ctx.drawImage(iconBitmap(id), x0 + i * cell + (cell - gs) / 2, rowY - gs / 2, gs, gs);
+    });
+    if (shown.length < owned.length) {
+      text(ctx, `+${owned.length - shown.length}`, x0 - 6 * k, rowY, 11 * k,
+        "rgba(244,241,232,0.5)", "right", "middle", 900);
+    }
+
     if (!next) {
-      text(ctx, "ARSENAL COMPLETE", w / 2, y + cell * 0.9, 12 * k, GOLD, "center", "middle", 900);
+      text(ctx, "ARSENAL COMPLETE", w / 2, rowY + 26 * k, 13 * k, GOLD, "center", "middle", 900);
       return;
     }
-    // A bar from the previous unlock to the next, so progress is visible per-round
-    // rather than as a fraction of a number nobody has a feel for.
+
+    // The next rung: named, pictured and measured from the rung below it, so the bar
+    // moves a visible amount every run instead of creeping against a 280k ceiling.
     const prev = previousCost(next.cost);
     const frac = clamp((carnage - prev) / Math.max(1, next.cost - prev), 0, 1);
-    const bw = Math.min(300 * k, w - 140 * k);
+    const bw = Math.min(320 * k, w - 120 * k);
     const bx = w / 2 - bw / 2;
-    const by = y + cell * 0.78;
-    ctx.fillStyle = "rgba(0,0,0,0.4)";
-    roundRect(ctx, bx, by, bw, 6 * k, 3 * k);
+    const by = rowY + 24 * k;
+
+    const gs = 24 * k;
+    ctx.drawImage(iconBitmap(next.id), bx - gs - 8 * k, by - gs / 2 + 2 * k, gs, gs);
+    text(ctx, `NEXT: ${weaponName(next.id)}`, bx, by - 4 * k, 12 * k, GOLD, "left", "middle", 900);
+    text(ctx, `${(next.cost - carnage).toLocaleString("en-US")} CARNAGE`, bx + bw, by - 4 * k, 11 * k,
+      "rgba(244,241,232,0.55)", "right", "middle", 800);
+
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    roundRect(ctx, bx, by + 6 * k, bw, 7 * k, 3.5 * k);
     ctx.fill();
     ctx.fillStyle = GOLD;
-    roundRect(ctx, bx, by, bw * frac, 6 * k, 3 * k);
+    roundRect(ctx, bx, by + 6 * k, bw * frac, 7 * k, 3.5 * k);
     ctx.fill();
-    text(ctx, `NEXT: ${weaponName(next.id)} — ${(next.cost - carnage).toLocaleString("en-US")} MORE CARNAGE`,
-      w / 2, by + 18 * k, 12 * k, "rgba(244,241,232,0.62)", "center", "middle", 800);
+
+    // And a glimpse of the one after, so the ladder never looks like it ends here.
+    const after = locked[1];
+    if (after) {
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      const as = 18 * k;
+      ctx.drawImage(iconBitmap(after[0]), bx + bw + 8 * k, by - as / 2 + 2 * k, as, as);
+      ctx.restore();
+      text(ctx, `THEN ${weaponName(after[0])}`, bx + bw + as + 14 * k, by + 2 * k, 10 * k,
+        "rgba(244,241,232,0.35)", "left", "middle", 800);
+    }
   }
 
+  /**
+   * A mode shortcut: a coloured strip, the mode's name, where this player is in it,
+   * and — for the two modes with something to choose between — a picker strip.
+   */
   private drawModeCard(
-    ctx: Ctx, m: ModeCard, x: number, y: number, w: number, h: number,
-    k: number, lift: number, selected: boolean,
+    ctx: Ctx, m: ModeCard, x: number, y: number, w: number, bodyH: number, stripH: number,
+    k: number, lift: number, selected: boolean, narrow = false,
   ) {
+    const h = bodyH + stripH;
     ctx.save();
     ctx.shadowColor = "rgba(0,0,0,0.5)";
-    ctx.shadowBlur = (10 + lift * 22) * k;
-    ctx.shadowOffsetY = (4 + lift * 6) * k;
+    ctx.shadowBlur = (8 + lift * 16) * k;
+    ctx.shadowOffsetY = (3 + lift * 4) * k;
     ctx.fillStyle = "rgba(18,21,29,0.94)";
-    roundRect(ctx, x, y, w, h, 14 * k);
+    roundRect(ctx, x, y, w, h, 12 * k);
     ctx.fill();
     ctx.restore();
 
-    // A big flat wash of the mode's colour, with its glyph sitting in it.
-    const bandH = h * 0.5;
     ctx.save();
-    roundRect(ctx, x, y, w, h, 14 * k);
+    roundRect(ctx, x, y, w, h, 12 * k);
     ctx.clip();
-    const grad = ctx.createLinearGradient(0, y, 0, y + bandH);
-    grad.addColorStop(0, `${m.accent}44`);
+    const grad = ctx.createLinearGradient(x, y, x + w * 0.8, y);
+    grad.addColorStop(0, `${m.accent}55`);
     grad.addColorStop(1, "rgba(18,21,29,0)");
     ctx.fillStyle = grad;
-    ctx.fillRect(x, y, w, bandH);
+    ctx.fillRect(x, y, w, bodyH);
+
+    if (stripH > 0) {
+      const hot = this.regionHovered(x, y + bodyH, w, stripH);
+      ctx.fillStyle = hot ? "rgba(255,255,255,0.14)" : "rgba(0,0,0,0.35)";
+      ctx.fillRect(x, y + bodyH, w, stripH);
+      text(ctx, `${m.browse}  ›`, x + w / 2, y + bodyH + stripH / 2 + 1 * k, 10 * k,
+        hot ? CREAM : "rgba(244,241,232,0.55)", "center", "middle", 800);
+    }
     ctx.restore();
 
-    drawModeGlyph(ctx, m.screen, x + w / 2, y + bandH * 0.52, bandH * 0.34, m.accent);
+    if (narrow) {
+      // Stacked: a big glyph over the name. The status line is the first thing cut —
+      // at this width it would be four points of shrunken type nobody can read.
+      const gr = bodyH * 0.3;
+      drawModeGlyph(ctx, m.screen, x + w / 2, y + bodyH * 0.36, gr, m.accent);
+      fitText(ctx, m.title, x + w / 2, y + bodyH * 0.8, 13 * k, w - 10 * k, CREAM, 900, "rgba(0,0,0,0.6)");
+    } else {
+      const gr = bodyH * 0.26;
+      drawModeGlyph(ctx, m.screen, x + 12 * k + gr, y + bodyH * 0.5, gr, m.accent);
 
-    text(ctx, m.title, x + w / 2, y + bandH + 16 * k, 22 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.6)");
-    wrapText(ctx, m.blurb, x + 18 * k, y + bandH + 42 * k, w - 36 * k, 13 * k, 17 * k, "rgba(244,241,232,0.55)", 3, "center", x + w / 2);
+      const tx = x + 12 * k + gr * 2 + 10 * k;
+      text(ctx, m.title, tx, y + bodyH * 0.4, 17 * k, CREAM, "left", "middle", 900, "rgba(0,0,0,0.6)");
+      fitText(ctx, m.status(), tx, y + bodyH * 0.68, 10 * k, x + w - 10 * k - tx,
+        "rgba(244,241,232,0.55)", 800, undefined, "left");
+    }
 
     ctx.strokeStyle = selected ? m.accent : `rgba(255,255,255,${0.08 + lift * 0.2})`;
-    ctx.lineWidth = (selected ? 3 : 1.5) * k;
-    roundRect(ctx, x, y, w, h, 14 * k);
+    ctx.lineWidth = (selected ? 2.5 : 1.5) * k;
+    roundRect(ctx, x, y, w, h, 12 * k);
     ctx.stroke();
   }
 
@@ -573,11 +926,15 @@ export class Menu {
     text(ctx, label, w / 2, y + bh / 2 + 2 * k, 28 * k, "#141820", "center", "middle", 900);
   }
 
+  /**
+   * One line of navigation help and nothing else.
+   *
+   * The control list that used to live here was the same manual the HUD showed over
+   * the first frame of play. Controls are taught in the game now, by the coach, when
+   * they are about to be needed — see `ui/coach.ts`.
+   */
   private drawFooter(ctx: Ctx, w: number, h: number, k: number, hint: string) {
-    const footY = h - 30 * k;
-    text(ctx, hint, w / 2, footY - 20 * k, 13 * k, "rgba(244,241,232,0.42)", "center", "middle", 700);
-    text(ctx, "A/D move   SPACE jump · hold to fly   MOUSE aim   CLICK fire   1/3 swap ammo   R go limp",
-      w / 2, footY, 13 * k, "rgba(244,241,232,0.3)", "center", "middle", 700);
+    text(ctx, hint, w / 2, h - 24 * k, 12 * k, "rgba(244,241,232,0.4)", "center", "middle", 700);
   }
 
   private drawLevelCard(
@@ -670,22 +1027,29 @@ export class Menu {
 
   // ------------------------------------------------------------------ pause menu
 
-  drawPause(ctx: Ctx, w: number, h: number, levelName: string) {
+  drawPause(ctx: Ctx, w: number, h: number, levelName: string, muted = false) {
     this.regions = [];
-    const k = clamp(Math.min(w / 1280, h / 760), 0.5, 1.25);
+    const k = this.scaleFor(w, h);
 
     ctx.fillStyle = "rgba(8,10,16,0.72)";
     ctx.fillRect(0, 0, w, h);
 
-    text(ctx, "PAUSED", w / 2, h * 0.3, 56 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.7)");
-    text(ctx, levelName.toUpperCase(), w / 2, h * 0.3 + 42 * k, 14 * k, "rgba(244,241,232,0.5)", "center", "middle", 800);
+    if (this.optionsOpen) {
+      this.drawOptions(ctx, w, h, k, muted);
+      return;
+    }
 
-    this.drawButtonStack(ctx, w, h * 0.44, k, [
+    text(ctx, "PAUSED", w / 2, h * 0.26, 56 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.7)");
+    text(ctx, levelName.toUpperCase(), w / 2, h * 0.26 + 42 * k, 14 * k, "rgba(244,241,232,0.5)", "center", "middle", 800);
+
+    const top = h * 0.4;
+    this.drawButtonStack(ctx, w, top, k, [
       { label: "RESUME", action: { kind: "resume" }, primary: true },
       { label: "RESTART LEVEL", action: { kind: "restart" } },
+      { label: "OPTIONS", action: { kind: "ui", ui: "options" } },
       { label: "MAIN MENU", action: { kind: "quit" } },
     ]);
-    text(ctx, "ESC to resume", w / 2, h * 0.44 + 3 * 64 * k + 18 * k, 12 * k, "rgba(244,241,232,0.35)", "center", "middle", 700);
+    text(ctx, "ESC to resume", w / 2, top + 4 * 64 * k + 6 * k, 12 * k, "rgba(244,241,232,0.35)", "center", "middle", 700);
   }
 
   // ------------------------------------------------------------------ results
@@ -697,61 +1061,111 @@ export class Menu {
    */
   drawResult(ctx: Ctx, w: number, h: number, r: ResultCard) {
     this.regions = [];
-    const k = clamp(Math.min(w / 1280, h / 760), 0.5, 1.25);
+    const k = this.scaleFor(w, h);
+    const narrow = w < 640;
 
-    ctx.fillStyle = r.won ? "rgba(8,16,12,0.9)" : "rgba(20,8,10,0.9)";
+    ctx.fillStyle = r.won ? "rgba(8,16,12,0.92)" : "rgba(20,8,10,0.92)";
     ctx.fillRect(0, 0, w, h);
 
-    // An unlock outranks the result. Dying is routine; earning the flamethrower is not,
-    // and it is the thing most likely to buy another run.
-    const top = h * (r.unlocked.length ? 0.13 : 0.2);
-    text(ctx, r.title, w / 2, top, 52 * k, r.won ? "#6ddc7a" : "#e8433a", "center", "middle", 900, "rgba(0,0,0,0.75)");
-    text(ctx, r.subtitle, w / 2, top + 40 * k, 15 * k, "rgba(244,241,232,0.7)", "center", "middle", 700);
+    // ------------------------------------------------------------ the big button
+    // Laid out first, from the bottom, because it is the only thing on this screen
+    // that has to be reachable without reading anything. Everything above it gets
+    // whatever room is left over rather than pushing it off a short viewport.
+    const primaryH = (narrow ? 78 : 88) * k;
+    const primaryW = Math.min(460 * k, w - 48 * k);
+    const primaryY = h - primaryH - (narrow ? 74 : 86) * k;
 
-    let sy = top + 76 * k;
-    if (r.unlocked.length) sy = this.drawUnlocks(ctx, w, sy, k, r.unlocked);
+    // Whichever action carries the run forward is the big one, and it is the same
+    // action SPACE takes — a visual default that disagrees with the keyboard default
+    // is a trap, so the order here mirrors `handleResultInput`.
+    const primary: { label: string; sub: string; action: MenuAction } = r.canRevive
+      ? { label: "CONTINUE RUN", sub: "WATCH AN AD · KEEP YOUR SCORE", action: { kind: "revive" } }
+      : r.hasNext
+        ? { label: "NEXT MISSION", sub: (r.nextLabel ?? "").toUpperCase(), action: { kind: "next" } }
+        : { label: r.retryLabel.toUpperCase(), sub: "SPACE", action: { kind: "restart" } };
 
-    // Stat rows.
-    const sw = 320 * k;
-    for (const [label, value] of r.stats) {
-      text(ctx, label, w / 2 - sw / 2, sy, 13 * k, "rgba(244,241,232,0.55)", "left", "middle", 700);
-      text(ctx, value, w / 2 + sw / 2, sy, 15 * k, CREAM, "right", "middle", 900);
-      ctx.fillStyle = "rgba(255,255,255,0.07)";
-      ctx.fillRect(w / 2 - sw / 2, sy + 11 * k, sw, 1 * k);
-      sy += 26 * k;
+    this.regions.push({ x: w / 2 - primaryW / 2, y: primaryY, w: primaryW, h: primaryH, action: primary.action });
+    this.goldSlab(ctx, w / 2 - primaryW / 2, primaryY, primaryW, primaryH, k,
+      this.regionHovered(w / 2 - primaryW / 2, primaryY, primaryW, primaryH));
+    text(ctx, primary.label, w / 2, primaryY + primaryH / 2 + 2 * k, Math.min(34 * k, primaryW * 0.11),
+      "#141820", "center", "middle", 900);
+    if (primary.sub) {
+      text(ctx, primary.sub, w / 2, primaryY + primaryH + 16 * k, 11 * k,
+        "rgba(244,241,232,0.45)", "center", "middle", 800);
     }
 
-    if (r.rank) {
-      text(ctx, `WORLD RANK  #${r.rank.toLocaleString("en-US")}`, w / 2, sy + 8 * k,
-        16 * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.6)");
-      sy += 30 * k;
+    // Secondaries live in the bottom corners, as far from the primary as the screen
+    // allows: a mis-tap on this card costs a session.
+    const sw = 116 * k;
+    const sh = 34 * k;
+    const sy = h - sh - 16 * k;
+    this.ghostButton(ctx, 16 * k, sy, sw, sh, k, "‹ MENU", { kind: "quit" });
+    if (r.canRevive || r.hasNext) {
+      this.ghostButton(ctx, w - sw - 16 * k, sy, sw, sh, k, r.retryLabel.toUpperCase(), { kind: "restart" });
     }
 
-    sy = this.drawCarnageBar(ctx, w, sy + 10 * k, k, r);
+    // ------------------------------------------------------------ the reward
+    const top = h * 0.11;
+    text(ctx, r.title, w / 2, top, (narrow ? 32 : 42) * k, r.won ? "#6ddc7a" : "#e8433a",
+      "center", "middle", 900, "rgba(0,0,0,0.75)");
 
-    const buttons: { label: string; action: MenuAction; primary?: boolean }[] = [];
-    // The revive sits on top and is the only thing tinted, because it is the offer.
-    if (r.canRevive) buttons.push({ label: "▸  CONTINUE RUN (AD)", action: { kind: "revive" }, primary: true });
-    if (r.hasNext) buttons.push({ label: "NEXT MISSION", action: { kind: "next" }, primary: !r.canRevive });
-    buttons.push({ label: r.retryLabel, action: { kind: "restart" }, primary: !r.hasNext && !r.canRevive });
-    buttons.push({ label: "MAIN MENU", action: { kind: "quit" } });
-    this.drawButtonStack(ctx, w, sy + 12 * k, k, buttons);
+    // What they earned leads, not whether they won. A loss that paid out 9,000 carnage
+    // is a good run, and the number is the reason to press the button below.
+    let y = top + 46 * k;
+    const pop = 1 + 0.04 * Math.sin(this.t * 4);
+    ctx.save();
+    ctx.translate(w / 2, y + 18 * k);
+    ctx.scale(pop, pop);
+    text(ctx, `+${r.earned.toLocaleString("en-US")}`, 0, 0, (narrow ? 46 : 62) * k, GOLD,
+      "center", "middle", 900, "rgba(0,0,0,0.6)");
+    ctx.restore();
+    text(ctx, "CARNAGE EARNED", w / 2, y + 48 * k, 12 * k, "rgba(244,241,232,0.55)", "center", "middle", 800);
+    y += 70 * k;
 
-    text(ctx, "SPACE  " + (r.canRevive ? "continue" : "again") + "     ESC  menu", w / 2, h - 22 * k,
-      12 * k, "rgba(244,241,232,0.32)", "center", "middle", 700);
+    if (r.record) {
+      text(ctx, r.record.toUpperCase(), w / 2, y, 15 * k, "#6ddc7a", "center", "middle", 900, "rgba(0,0,0,0.6)");
+      y += 26 * k;
+    } else if (r.rank) {
+      text(ctx, `WORLD RANK  #${r.rank.toLocaleString("en-US")}`, w / 2, y, 15 * k, GOLD,
+        "center", "middle", 900, "rgba(0,0,0,0.6)");
+      y += 26 * k;
+    }
+
+    if (r.unlocked.length) y = this.drawUnlocks(ctx, w, y, k, r.unlocked);
+
+    // ------------------------------------------------------------ the near miss
+    y = this.drawNextUp(ctx, w, y + 6 * k, k, r);
+
+    // Stats last and small: they are the receipt, not the offer. A single row of
+    // chips rather than a table, because nobody reads four labelled rows twice.
+    const room = primaryY - 26 * k - y;
+    if (room > 34 * k) this.drawStatChips(ctx, w, y + 6 * k, k, r.stats, narrow);
+  }
+
+  private ghostButton(
+    ctx: Ctx, x: number, y: number, w: number, h: number, k: number,
+    label: string, action: MenuAction,
+  ) {
+    const hot = this.regionHovered(x, y, w, h);
+    this.regions.push({ x, y, w, h, action });
+    ctx.fillStyle = hot ? "rgba(255,255,255,0.16)" : "rgba(255,255,255,0.06)";
+    roundRect(ctx, x, y, w, h, 8 * k);
+    ctx.fill();
+    text(ctx, label, x + w / 2, y + h / 2 + 1 * k, 11 * k,
+      hot ? CREAM : "rgba(244,241,232,0.55)", "center", "middle", 900);
   }
 
   /** The "you earned something" banner. Returns the Y to carry on drawing from. */
   private drawUnlocks(ctx: Ctx, w: number, y: number, k: number, ids: string[]) {
     const pulse = 0.55 + 0.45 * Math.sin(this.t * 5);
-    const gs = 44 * k;
-    const gap = 12 * k;
+    const gs = 38 * k;
+    const gap = 10 * k;
     const totalW = ids.length * gs + (ids.length - 1) * gap;
-    const bw = Math.min(w - 60 * k, totalW + 60 * k);
-    const bh = gs + 58 * k;
+    const bw = Math.min(w - 48 * k, totalW + 60 * k);
+    const bh = gs + 48 * k;
     const bx = w / 2 - bw / 2;
 
-    ctx.fillStyle = "rgba(255,210,63,0.1)";
+    ctx.fillStyle = "rgba(255,210,63,0.12)";
     roundRect(ctx, bx, y, bw, bh, 12 * k);
     ctx.fill();
     ctx.strokeStyle = rgbaHex(GOLD, 0.35 + pulse * 0.5);
@@ -759,41 +1173,81 @@ export class Menu {
     ctx.stroke();
 
     text(ctx, ids.length > 1 ? `${ids.length} NEW ROUNDS UNLOCKED` : "NEW ROUND UNLOCKED",
-      w / 2, y + 20 * k, 15 * k, GOLD, "center", "middle", 900);
+      w / 2, y + 16 * k, 13 * k, GOLD, "center", "middle", 900);
 
     const x0 = w / 2 - totalW / 2;
     ids.forEach((id, i) => {
-      ctx.drawImage(iconBitmap(id), x0 + i * (gs + gap), y + 32 * k, gs, gs);
+      ctx.drawImage(iconBitmap(id), x0 + i * (gs + gap), y + 26 * k, gs, gs);
     });
-    text(ctx, ids.map(weaponName).join("   ·   "), w / 2, y + bh - 14 * k,
-      13 * k, CREAM, "center", "middle", 900);
-    return y + bh + 18 * k;
+    text(ctx, ids.map(weaponName).join("   ·   "), w / 2, y + bh - 12 * k,
+      12 * k, CREAM, "center", "middle", 900);
+    return y + bh + 14 * k;
   }
 
-  /** Carnage banked this run, and how much further the next round is. */
-  private drawCarnageBar(ctx: Ctx, w: number, y: number, k: number, r: ResultCard) {
-    const bw = Math.min(340 * k, w - 80 * k);
+  /**
+   * How close the next round is.
+   *
+   * Deliberately the largest thing on the card after the earnings, and deliberately
+   * phrased as a distance rather than a total: "820 away" is a run, "3,000 of 6,000"
+   * is arithmetic. When the bar is most of the way across it says so out loud, because
+   * a player who is nearly there and knows it will press the button underneath.
+   */
+  private drawNextUp(ctx: Ctx, w: number, y: number, k: number, r: ResultCard) {
+    const bw = Math.min(400 * k, w - 48 * k);
     const bx = w / 2 - bw / 2;
 
-    text(ctx, `+${r.earned.toLocaleString("en-US")} CARNAGE`, bx, y, 14 * k, GOLD, "left", "middle", 900);
-    text(ctx, r.carnage.toLocaleString("en-US") + " TOTAL", bx + bw, y, 12 * k,
-      "rgba(244,241,232,0.5)", "right", "middle", 800);
-
     if (!r.next) {
-      text(ctx, "ARSENAL COMPLETE", w / 2, y + 22 * k, 12 * k, GOLD, "center", "middle", 900);
-      return y + 34 * k;
+      text(ctx, "ARSENAL COMPLETE", w / 2, y + 12 * k, 14 * k, GOLD, "center", "middle", 900);
+      return y + 30 * k;
     }
-    const by = y + 14 * k;
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    roundRect(ctx, bx, by, bw, 8 * k, 4 * k);
+
+    const frac = clamp(r.next.frac, 0, 1);
+    const gs = 34 * k;
+    ctx.drawImage(iconBitmap(r.next.id), bx, y, gs, gs);
+    text(ctx, `NEXT: ${weaponName(r.next.id)}`, bx + gs + 10 * k, y + 11 * k, 14 * k, GOLD, "left", "middle", 900);
+    text(ctx, `${r.next.remaining.toLocaleString("en-US")} AWAY`, bx + bw, y + 11 * k, 13 * k,
+      CREAM, "right", "middle", 900);
+
+    const by = y + gs + 4 * k;
+    ctx.fillStyle = "rgba(0,0,0,0.5)";
+    roundRect(ctx, bx, by, bw, 12 * k, 6 * k);
     ctx.fill();
     ctx.fillStyle = GOLD;
-    roundRect(ctx, bx, by, bw * clamp(r.next.frac, 0, 1), 8 * k, 4 * k);
+    roundRect(ctx, bx, by, bw * frac, 12 * k, 6 * k);
     ctx.fill();
-    ctx.drawImage(iconBitmap(r.next.id), bx + bw - 8 * k, by - 9 * k, 26 * k, 26 * k);
-    text(ctx, `${weaponName(r.next.id)} in ${r.next.remaining.toLocaleString("en-US")}`,
-      bx, by + 24 * k, 12 * k, "rgba(244,241,232,0.62)", "left", "middle", 800);
-    return by + 36 * k;
+    // A moving highlight on the filled part, so the bar looks charged rather than dead.
+    ctx.save();
+    roundRect(ctx, bx, by, bw * frac, 12 * k, 6 * k);
+    ctx.clip();
+    ctx.fillStyle = `rgba(255,255,255,${0.12 + 0.12 * Math.sin(this.t * 3)})`;
+    ctx.fillRect(bx, by, bw * frac, 5 * k);
+    ctx.restore();
+
+    if (frac > 0.65) {
+      text(ctx, "ONE GOOD RUN AWAY", w / 2, by + 26 * k, 12 * k, "#6ddc7a", "center", "middle", 900);
+      return by + 40 * k;
+    }
+    text(ctx, `${r.carnage.toLocaleString("en-US")} TOTAL CARNAGE`, w / 2, by + 24 * k, 11 * k,
+      "rgba(244,241,232,0.4)", "center", "middle", 800);
+    return by + 38 * k;
+  }
+
+  /** The run's numbers, as a single row of chips. */
+  private drawStatChips(ctx: Ctx, w: number, y: number, k: number, stats: [string, string][], narrow: boolean) {
+    const list = stats.slice(0, narrow ? 3 : 4);
+    if (!list.length) return;
+    const gap = 8 * k;
+    const cw = Math.min(120 * k, (w - 48 * k - gap * (list.length - 1)) / list.length);
+    const ch = 42 * k;
+    const x0 = w / 2 - (list.length * cw + (list.length - 1) * gap) / 2;
+    list.forEach(([label, value], i) => {
+      const x = x0 + i * (cw + gap);
+      ctx.fillStyle = "rgba(255,255,255,0.06)";
+      roundRect(ctx, x, y, cw, ch, 8 * k);
+      ctx.fill();
+      fitText(ctx, value, x + cw / 2, y + 16 * k, 16 * k, cw - 10 * k, CREAM, 900);
+      fitText(ctx, label, x + cw / 2, y + 32 * k, 9 * k, cw - 8 * k, "rgba(244,241,232,0.45)", 800);
+    });
   }
 
   private drawButtonStack(
@@ -1084,6 +1538,50 @@ function rgbaHex(hex: string, alpha: number) {
 function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
   ctx.beginPath();
   ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), r);
+}
+
+const fontOf = (size: number, weight: number) =>
+  `${weight} ${size}px "Trebuchet MS", "Segoe UI", system-ui, sans-serif`;
+
+function measure(ctx: Ctx, str: string, size: number, weight: number) {
+  ctx.font = fontOf(size, weight);
+  return ctx.measureText(str).width;
+}
+
+/**
+ * Text that shrinks rather than overflowing.
+ *
+ * The front page has to hold a seventeen-character title and a mission name on a
+ * 390px phone. Wrapping either one would break the shape of the page, and clipping
+ * them looks broken, so the size gives way instead.
+ */
+function fitText(
+  ctx: Ctx, str: string, x: number, y: number, size: number, maxW: number,
+  color: string, weight = 800, stroke?: string, align: CanvasTextAlign = "center",
+) {
+  let s = size;
+  while (s > 6 && measure(ctx, str, s, weight) > maxW) s -= 0.5;
+  text(ctx, str, x, y, s, color, align, "middle", weight, stroke);
+}
+
+/** Options cog. Six teeth is enough to read as one at any size this is drawn at. */
+function drawGear(ctx: Ctx, cx: number, cy: number, r: number, hot: boolean) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = hot ? CREAM : "rgba(244,241,232,0.6)";
+  ctx.lineWidth = r * 0.26;
+  ctx.lineCap = "round";
+  for (let i = 0; i < 6; i++) {
+    const a = (i * TAU) / 6;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * r * 0.66, Math.sin(a) * r * 0.66);
+    ctx.lineTo(Math.cos(a) * r * 1.15, Math.sin(a) * r * 1.15);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.62, 0, TAU);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function text(

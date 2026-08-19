@@ -20,23 +20,38 @@ export const drawCar: PropDraw = (ctx, w, h) => {
     [-w * 0.3, -h * 0.06], [-w * 0.2, h * 0.34],
     [w * 0.2, h * 0.34], [w * 0.32, -h * 0.06],
   ], shade(body, -0.12), shade(body, -0.45), 0.05);
-  // Windows.
+  // Glass. Dark at the top where it reflects sky, warm at the sill where the cabin
+  // light is — the same lit/unlit read the towers use, at one twentieth the size.
   poly(ctx, [
     [-w * 0.25, 0], [-w * 0.17, h * 0.26],
     [-w * 0.02, h * 0.26], [-w * 0.02, 0],
-  ], "#a9dcef", null);
+  ], "#2c4a63", null);
   poly(ctx, [
     [w * 0.02, 0], [w * 0.02, h * 0.26],
     [w * 0.16, h * 0.26], [w * 0.26, 0],
-  ], "#a9dcef", null);
+  ], "#2c4a63", null);
+  ctx.fillStyle = "#ffcf7a";
+  ctx.fillRect(-w * 0.24, 0, w * 0.22, h * 0.07);
+  ctx.fillRect(w * 0.03, 0, w * 0.21, h * 0.07);
+  // Specular streak across the pane, which is what makes a flat fill read as glass.
+  poly(ctx, [
+    [-w * 0.24, h * 0.1], [-w * 0.2, h * 0.24],
+    [-w * 0.12, h * 0.24], [-w * 0.18, h * 0.1],
+  ], rgba("#ffffff", 0.34), null);
   ctx.restore();
   // Wheels.
   for (const sx of [-0.29, 0.3]) {
     disc(ctx, w * sx, -h * 0.28, h * 0.22, "#1b1e26", null);
     disc(ctx, w * sx, -h * 0.28, h * 0.1, "#8d95a3", null);
+    disc(ctx, w * sx, -h * 0.28, h * 0.05, "#4a515c", null);
   }
-  // Lights.
-  disc(ctx, w * 0.47, h * 0.02, h * 0.08, "#ffe9a8", null);
+  // Sill highlight — a light direction across the body, so it is not one flat slab.
+  ctx.fillStyle = rgba("#ffffff", 0.16);
+  ctx.fillRect(-w * 0.46, h * 0.14, w * 0.92, h * 0.05);
+  // Lights, each with a bloom so they read as emitting rather than painted on.
+  disc(ctx, w * 0.47, h * 0.02, h * 0.15, rgba("#ffe9a8", 0.28), null);
+  disc(ctx, w * 0.47, h * 0.02, h * 0.08, "#fff3cf", null);
+  disc(ctx, -w * 0.47, h * 0.02, h * 0.12, rgba("#ff6b5a", 0.26), null);
   disc(ctx, -w * 0.47, h * 0.02, h * 0.07, "#ff6b5a", null);
 };
 
@@ -71,11 +86,12 @@ export const drawPlane: PropDraw = (ctx, w, h) => {
   // Engine pod.
   roundBox(ctx, w * 0.2, h * 0.3, h * 0.1, "#98a2b3", OUT, 0.04);
 
-  // Livery stripe + windows.
+  // Livery stripe + cabin windows. Most are dark, a few have the reading light on —
+  // the scatter is what stops a row of identical dots reading as perforations.
   ctx.fillStyle = "#2f6fd0";
   ctx.fillRect(-w * 0.46, -h * 0.08, w * 0.92, h * 0.08);
-  ctx.fillStyle = "#3a4250";
   for (let i = 0; i < 9; i++) {
+    ctx.fillStyle = i === 1 || i === 4 || i === 5 || i === 8 ? "#ffd98f" : "#28303d";
     ctx.beginPath();
     ctx.arc(-w * 0.36 + i * w * 0.085, h * 0.14, h * 0.045, 0, TAU);
     ctx.fill();
@@ -210,6 +226,10 @@ export const drawSawblade: PropDraw = (ctx, _w, h) => {
 
 export const drawTv: PropDraw = (ctx, w, h) => {
   roundBox(ctx, w, h, h * 0.1, "#2b303c", "#141820", 0.05);
+  // Spill from the screen onto the bezel. A lit rectangle is a rectangle; a lit
+  // rectangle that throws light on its own frame is a screen.
+  ctx.fillStyle = rgba("#7fd0e8", 0.3);
+  ctx.fillRect(-w * 0.46, -h * 0.34, w * 0.92, h * 0.74);
   ctx.fillStyle = "#7fd0e8";
   ctx.fillRect(-w * 0.4, -h * 0.28, w * 0.8, h * 0.62);
   // Static bars.
@@ -291,25 +311,74 @@ export const drawBarrel: PropDraw = (ctx, w, h) => {
 const ICON_PX = 128;
 const iconCache = new Map<string, HTMLCanvasElement>();
 
+/** Scratch buffers reused by every bake, so a full wheel costs two canvases, not forty. */
+let stampA: HTMLCanvasElement | null = null;
+let stampB: HTMLCanvasElement | null = null;
+
+/**
+ * Grows `src`'s silhouette by `r` pixels and recolours the result.
+ *
+ * Canvas2D has no outline-a-bitmap primitive, so the shape is stamped in a ring of
+ * offset copies to union a fatter version of itself, then `source-in` repaints that
+ * union flat. Rings rather than a filled disc because only the *edge* has to be
+ * covered — whatever the ring leaves hollow is painted over by the glyph itself.
+ */
+function dilate(src: HTMLCanvasElement, dst: HTMLCanvasElement, r: number, color: string) {
+  const g = dst.getContext("2d")!;
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.clearRect(0, 0, ICON_PX, ICON_PX);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * TAU;
+    g.drawImage(src, Math.cos(a) * r, Math.sin(a) * r);
+  }
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * TAU + 0.4;
+    g.drawImage(src, Math.cos(a) * r * 0.55, Math.sin(a) * r * 0.55);
+  }
+  g.globalCompositeOperation = "source-in";
+  g.fillStyle = color;
+  g.fillRect(0, 0, ICON_PX, ICON_PX);
+  g.globalCompositeOperation = "source-over";
+}
+
 export function iconBitmap(id: string): HTMLCanvasElement {
   let c = iconCache.get(id);
   if (c) return c;
   c = document.createElement("canvas");
   c.width = c.height = ICON_PX;
   const g = c.getContext("2d")!;
-  // Soft light disc behind every glyph. Several props are near-black (stickman, piano,
-  // bowling ball) and would otherwise disappear into the dark HUD slot entirely.
-  const halo = g.createRadialGradient(ICON_PX / 2, ICON_PX / 2, 0, ICON_PX / 2, ICON_PX / 2, ICON_PX * 0.5);
-  halo.addColorStop(0, "rgba(255,255,255,0.26)");
-  halo.addColorStop(0.65, "rgba(255,255,255,0.1)");
-  halo.addColorStop(1, "rgba(255,255,255,0)");
-  g.fillStyle = halo;
-  g.fillRect(0, 0, ICON_PX, ICON_PX);
 
-  g.translate(ICON_PX / 2, ICON_PX / 2);
-  g.scale(1, -1); // icons are authored +Y up, like the world
-  g.lineJoin = "round";
-  drawIcon(g, id, ICON_PX * 0.9, 0);
+  if (!stampA) {
+    stampA = document.createElement("canvas");
+    stampA.width = stampA.height = ICON_PX;
+    stampB = document.createElement("canvas");
+    stampB.width = stampB.height = ICON_PX;
+  }
+  const sa = stampA.getContext("2d")!;
+  sa.setTransform(1, 0, 0, 1, 0, 0);
+  sa.clearRect(0, 0, ICON_PX, ICON_PX);
+  sa.translate(ICON_PX / 2, ICON_PX / 2);
+  sa.scale(1, -1); // icons are authored +Y up, like the world
+  sa.lineJoin = "round";
+  // Slightly under full size: the rim below needs somewhere to go.
+  drawIcon(sa, id, ICON_PX * 0.78, 0);
+
+  /*
+   * Two rims, and both are load-bearing.
+   *
+   * These glyphs run the full value range — the stickman and the bowling ball are
+   * near-black, the fridge and the jetliner are near-white — and they are blitted onto
+   * a dark HUD slot, a pale results card and a level-select thumbnail of any colour.
+   * A single rim only ever solves one of those. A dark outer halo carries the light
+   * glyphs against light ground, a white keyline inside it carries the dark ones
+   * against dark ground, and every glyph ends up reading as a sticker on any backing.
+   */
+  dilate(stampA, stampB!, 9, "rgba(8,10,16,0.5)");
+  g.drawImage(stampB!, 0, 0);
+  dilate(stampA, stampB!, 5, "rgba(255,255,255,0.92)");
+  g.drawImage(stampB!, 0, 0);
+  g.drawImage(stampA, 0, 0);
+
   iconCache.set(id, c);
   return c;
 }

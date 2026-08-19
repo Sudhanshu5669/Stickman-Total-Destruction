@@ -60,6 +60,22 @@ const makeCreature = (cfg: CreatureConfig) =>
 /**
  * The arsenal. Every entry is pure data plus a spawn closure, so adding a new
  * ridiculous round is a single object literal — no new classes, no new systems.
+ *
+ * **On `points`.** A payload's score is balanced on *points per second of sustained
+ * fire* — `points * count / cooldown` — not on the per-shot number, because the two
+ * come apart by two orders of magnitude across this list: the chicken cannon empties
+ * twenty-three birds a second and the black hole fires once every five. Balanced the
+ * naive way, a satisfying number on the chicken is a hundred times the correct one.
+ *
+ * The bands are: ~180/s for the free teaching rounds, ~250-300/s through the early
+ * unlocks, ~375-480/s for the heavy artillery and ~900-1000/s for the two apocalypse
+ * rounds. That is what makes a nuke read as `+4,000` and a chicken as `+8` while the
+ * grind rate stays sane, and it is why the per-shot numbers below look wildly
+ * inconsistent until you divide by the fire rate.
+ *
+ * These are the *garnish*, not the meal — most of a run's score comes from the blocks
+ * the payload knocks down (`MATERIALS` in `entities/block.ts`), which is correct: the
+ * game is about the building coming down, not about the object that hit it.
  */
 export const AMMO: AmmoDef[] = [
   {
@@ -72,7 +88,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeCreature({
       spec: CHICKEN, scale: 1, massScale: 1, flail: 1.5, hp: 16,
       voice: () => sfx.cluck(), voiceInterval: 0.55,
-      splatColor: "#e05a4a", points: 5, bonusDamage: 2,
+      splatColor: "#e05a4a", points: 8, bonusDamage: 2,
       draw: (ctx, r) => drawChicken(ctx, r),
     }),
   },
@@ -89,7 +105,7 @@ export const AMMO: AmmoDef[] = [
       gravityScale: 0.22, thrust: 62, thrustTime: 2.4, steer: 7,
       trail: "fire", angularDamping: 2, restitution: 0.05,
       explode: { radius: 6.6, force: 26, damage: 260, minEnergy: 0.4 },
-      draw: P.drawRocket, points: 25, life: 9,
+      draw: P.drawRocket, points: 150, life: 9,
     })),
   },
   {
@@ -108,7 +124,7 @@ export const AMMO: AmmoDef[] = [
       // before going up instead of detonating against the very first thing it grazes.
       explode: { radius: 6.4, force: 26, damage: 300, minEnergy: 45 },
       bonusDamage: 70,
-      impactSound: "metal", draw: P.drawCar, points: 45,
+      impactSound: "metal", draw: P.drawCar, points: 400,
     })),
   },
   {
@@ -124,7 +140,7 @@ export const AMMO: AmmoDef[] = [
       gravityScale: 0.34, thrust: 24, thrustTime: 4, lift: 0.055, steer: 1.1,
       trail: "smoke", trailColor: "#c9d2de", angularDamping: 1.4,
       explode: { radius: 12.5, force: 32, damage: 460, minEnergy: 45 },
-      impactSound: "metal", draw: P.drawPlane, points: 120, life: 16,
+      impactSound: "metal", draw: P.drawPlane, points: 1400, life: 16,
     })),
   },
   {
@@ -138,7 +154,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeCreature({
       spec: QUADRUPED, scale: 2.3, massScale: 1.5, flail: 0.75, hp: 420,
       voice: () => sfx.trumpet(), voiceInterval: 1.6,
-      splatColor: "#b03a4a", points: 90, bonusDamage: 45,
+      splatColor: "#b03a4a", points: 650, bonusDamage: 45,
       draw: (ctx, r) => drawQuadruped(ctx, r, { body: "#8d8f99", dark: "#767884" }),
     }),
   },
@@ -152,7 +168,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeCreature({
       spec: BIPED_LITE, scale: 1, massScale: 1, flail: 1.9, hp: 55,
       voice: () => sfx.scream(), voiceInterval: 1.1,
-      splatColor: "#c0263a", points: 20, bonusDamage: 8,
+      splatColor: "#c0263a", points: 60, bonusDamage: 8,
       draw: (ctx, r) => drawBiped(ctx, r, { ink: "#38404f", fill: "#38404f" }),
     }),
   },
@@ -166,7 +182,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeRigid(rigid({
       shape: "box", w: 1.0, h: 0.72, density: 950,
       restitution: 0.03, friction: 0.9, angularDamping: 0.04,
-      impactSound: "metal", draw: P.drawAnvil, points: 30, bonusDamage: 12,
+      impactSound: "metal", draw: P.drawAnvil, points: 90, bonusDamage: 12,
     })),
   },
   {
@@ -177,9 +193,12 @@ export const AMMO: AmmoDef[] = [
     count: 1, spread: 0.04, speed: 29, speedVar: 2, cooldown: 0.8,
     recoil: 14, heft: 0.85, auto: false, reserve: -1, muzzle: 1.8,
     spawn: makeRigid(rigid({
-      shape: "box", w: 2.4, h: 1.5, density: 135,
+      // 1.08 tonnes. At the old density a concert grand five times the anvil's volume
+      // weighed less than it did and bounced off brick, which made the round a joke
+      // with no punchline — it has to land like furniture, not like a prop.
+      shape: "box", w: 2.4, h: 1.5, density: 300,
       restitution: 0.06, angularDamping: 0.06,
-      impactSound: "piano", draw: P.drawPiano, points: 40, bonusDamage: 10,
+      impactSound: "piano", draw: P.drawPiano, points: 300, bonusDamage: 10,
     })),
   },
   {
@@ -192,7 +211,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeRigid(rigid({
       shape: "box", w: 0.95, h: 1.95, density: 195,
       restitution: 0.08, freeze: { radius: 1.9 },
-      impactSound: "glass", draw: P.drawFridge, points: 22,
+      impactSound: "glass", draw: P.drawFridge, points: 130,
     })),
   },
   {
@@ -205,7 +224,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeRigid(rigid({
       shape: "ball", w: 0.56, h: 0.56, density: 900,
       restitution: 0.52, friction: 0.25, angularDamping: 0.02,
-      impactSound: "ricochet", draw: P.drawBowling, points: 20, bonusDamage: 8,
+      impactSound: "ricochet", draw: P.drawBowling, points: 90, bonusDamage: 8,
     })),
   },
   {
@@ -218,7 +237,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeRigid(rigid({
       shape: "ball", w: 0.62, h: 0.62, density: 230,
       restitution: 0.16, splat: { color: "#e0455c", count: 22 },
-      impactSound: "splat", draw: P.drawWatermelon, points: 10, life: 14,
+      impactSound: "splat", draw: P.drawWatermelon, points: 15, life: 14,
     })),
   },
   {
@@ -232,20 +251,25 @@ export const AMMO: AmmoDef[] = [
       shape: "ball", w: 0.85, h: 0.85, density: 520,
       restitution: 0.66, friction: 0.03, gravityScale: 0.55, spin: 42,
       trail: "sparkle", trailColor: "#ffd23f",
-      bonusDamage: 48, impactSound: "saw", draw: P.drawSawblade, points: 18, life: 12,
+      bonusDamage: 48, impactSound: "saw", draw: P.drawSawblade, points: 55, life: 12,
     })),
   },
   {
     id: "tv",
     name: "Static Discharge",
-    tagline: "Nothing good was on anyway.",
+    tagline: "Five at once, straight down the hall.",
+    // The one genuinely redundant round in the arsenal: two light boxes in a narrow
+    // cone that splatter glass was a worse Melon Repeater, with no verb of its own.
+    // Rebuilt as the close-range cone — five sets at a wide angle on a slow cycle — so
+    // it owns the one job nothing else does: everything in front of you, right now.
+    // Useless past fifteen metres, which is exactly what gives it an identity.
     tint: "#7fd0e8",
-    count: 2, spread: 0.15, speed: 35, speedVar: 5, cooldown: 0.4,
-    recoil: 5, heft: 0.4, auto: true, reserve: -1, muzzle: 1.0,
+    count: 5, spread: 0.34, speed: 30, speedVar: 7, cooldown: 0.62,
+    recoil: 8, heft: 0.5, auto: true, reserve: -1, muzzle: 1.0,
     spawn: makeRigid(rigid({
       shape: "box", w: 1.1, h: 0.82, density: 160,
-      restitution: 0.12, splat: { color: "#9fe6f5", count: 14 },
-      impactSound: "glass", draw: P.drawTv, points: 12,
+      restitution: 0.12, splat: { color: "#9fe6f5", count: 20 },
+      impactSound: "glass", draw: P.drawTv, points: 32,
     })),
   },
   {
@@ -258,7 +282,7 @@ export const AMMO: AmmoDef[] = [
     spawn: makeRigid(rigid({
       shape: "box", w: 0.82, h: 1.2, density: 210,
       explode: { radius: 7.2, force: 25, damage: 230, minEnergy: 0.8 },
-      draw: P.drawBarrel, points: 28,
+      draw: P.drawBarrel, points: 110,
     })),
   },
   {
@@ -272,7 +296,7 @@ export const AMMO: AmmoDef[] = [
       shape: "box", w: 1.6, h: 0.62, density: 420,
       gravityScale: 0.62, steer: 3, trail: "smoke", trailColor: "#d6dbe4",
       explode: { radius: 34, force: 62, damage: 4000, minEnergy: 0.3, nuke: true },
-      draw: P.drawNuke, points: 500, life: 12,
+      draw: P.drawNuke, points: 4000, life: 12,
     })),
   },
   {
@@ -288,7 +312,7 @@ export const AMMO: AmmoDef[] = [
       gravityScale: 0.04, linearDamping: 1.6, restitution: 0.1,
       trail: "void", attract: { radius: 24, strength: 340, duration: 3.6 },
       explode: { radius: 17, force: 44, damage: 700, minEnergy: 1e9 },
-      impactSound: "none", draw: P.drawBlackhole, points: 300, life: 14,
+      impactSound: "none", draw: P.drawBlackhole, points: 5000, life: 14,
     })),
   },
   {

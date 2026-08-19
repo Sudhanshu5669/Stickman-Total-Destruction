@@ -2,16 +2,44 @@
  * A world's whole visual identity in one object: sky, horizon, ground and the
  * silhouette on the skyline. Levels reference a theme instead of hardcoding colours,
  * so a new world is a palette plus a layout rather than a new renderer.
+ *
+ * Every palette here is built on the same seven-step value ladder, because the game's
+ * lead character is a black stick figure and the only thing that can lose him is a
+ * frame with no value structure. Read top to bottom, each world runs:
+ *
+ *   1 sky top        darkest sky, most saturated — gives the frame a lid
+ *   2 sky horizon    lightest thing in the frame; silhouettes are read against it
+ *   3 far silhouette barely separated from the sky (atmospheric perspective)
+ *   4 ridges         far → mid → near, each step darker and more saturated
+ *   5 surface line   brightest saturated colour in the frame, one hard graphic edge
+ *   6 soil body      mid-dark and warm, so props and rubble sit on top of it
+ *   7 bedrock        near-black, the floor of the value range
+ *
+ * The rule the whole thing exists to serve: **background low-contrast, playable band
+ * high-contrast.** Everything from the horizon up sits inside a narrow, desaturated
+ * range; everything the player can touch is separated by at least two steps of value
+ * from whatever it sits against. That is what makes a black stickman read instantly,
+ * and what makes the frame survive being shrunk to a 200px thumbnail.
  */
 export interface Theme {
   id: string;
   /** Sky gradient stops, top to bottom, at 0 / 0.42 / 0.78 / 1. */
   sky: [string, string, string, string];
+  /**
+   * Light banked along the horizon itself, as "r,g,b". This is the single cheapest
+   * source of drama in the frame: it lifts the sky exactly where silhouettes cross it.
+   */
+  horizonGlow: string;
+  horizonGlowAlpha: number;
+  /** Ridge bands, far to near. Each is darker and more saturated than the last. */
   hillFar: string;
+  hillMid: string;
   hillNear: string;
   /** Distant silhouette drawn behind the hills. */
   skyline: "city" | "castle" | "spires" | "mesa" | "none";
   skylineColor: string;
+  /** A second, hazier silhouette band behind `skylineColor` — depth in one colour. */
+  skylineFar: string;
   /** Lit windows in the skyline; set alpha to 0 for uninhabited worlds. */
   windowColor: string;
   cloudColor: string;
@@ -31,6 +59,16 @@ export interface Theme {
   groundTop: string;
   rock: string;
   rockTop: string;
+  /**
+   * Bedrock. Everything below the ground plane fades from `ground` to this, which is
+   * both the depth cue under a canyon and the reason no sky can ever show beneath the
+   * terrain slabs — see `Background.drawSubsurface`.
+   */
+  underground: string;
+  /** Near-camera silhouettes that pass in front of the action. Near-black by design. */
+  foreground: string;
+  /** Which shape vocabulary the near layer uses. */
+  foregroundKind: "grass" | "bones" | "fungal" | "rock";
   /** Full-screen colour wash applied over the finished frame. */
   ambient?: string;
   ambientAlpha?: number;
@@ -39,99 +77,169 @@ export interface Theme {
 }
 
 export const THEMES: Record<string, Theme> = {
+  /**
+   * Test Range — bright noon playground.
+   *
+   * The whole sky runs cool (azure → cyan → cream) and the whole ground runs warm
+   * (emerald → ochre → chocolate), so the horizon is a hue flip as well as a value
+   * flip. It also keeps the level's own materials legible: brick towers are warm red
+   * and concrete is neutral grey, and both of those separate hard from a cool backdrop.
+   */
   day: {
     id: "day",
-    sky: ["#243a63", "#4a7bb0", "#8fb8d6", "#d9d2b6"],
-    hillFar: "#6d90a8",
-    hillNear: "#4e6b82",
+    sky: ["#0742a0", "#1a86e0", "#6fd2f5", "#ffe7a8"],
+    horizonGlow: "255,222,138",
+    horizonGlowAlpha: 0.55,
+    hillFar: "#63a2c4",
+    hillMid: "#358a94",
+    hillNear: "#18613f",
     skyline: "city",
-    skylineColor: "#5c7690",
-    windowColor: "rgba(255,214,120,0.25)",
+    skylineColor: "#3f77ac",
+    skylineFar: "#86bbdb",
+    windowColor: "rgba(255,216,128,0.55)",
     cloudColor: "255,255,255",
-    cloudAlpha: 0.72,
-    cloudCount: 16,
-    sun: { xFrac: 0.78, yOffset: 300, color: "255,240,190", radius: 260 },
+    cloudAlpha: 0.9,
+    cloudCount: 18,
+    sun: { xFrac: 0.78, yOffset: 300, color: "255,244,196", radius: 300 },
     moon: null,
     stars: 0,
     starColor: "#ffffff",
-    haze: "210,200,170",
-    ground: "#3a4b3a",
-    groundTop: "#5c8a43",
-    rock: "#4a4740",
-    rockTop: "#6b6353",
+    haze: "255,224,164",
+    ground: "#7d4520",
+    groundTop: "#63e03f",
+    rock: "#6b5a44",
+    rockTop: "#9c8560",
+    underground: "#211105",
+    foreground: "#0e2411",
+    foregroundKind: "grass",
+    // A whisper of warm overlay. Overlay only pushes what is already there, so it
+    // saturates the greens and golds without touching the black of the stickmen.
+    ambient: "#ffc46a",
+    ambientAlpha: 0.07,
     vegetation: true,
   },
 
+  /**
+   * Blackthorn Keep — cold moonlit night with warm fire in it.
+   *
+   * Night is where a black protagonist is easiest to lose, so this palette does the
+   * opposite of what "night" usually means: the sky gets *lighter* toward the horizon
+   * and the ground surface is held at a genuine mid value. The castle is the only
+   * near-black mass, which is exactly where you want the eye. Every artificial light
+   * — windows, torches — is warm orange against cold blue, the strongest contrast pair
+   * available, and it is spent only on things that matter.
+   */
   night: {
     id: "night",
-    sky: ["#070b1c", "#101a3a", "#1e2c50", "#33405e"],
-    hillFar: "#1b2440",
-    hillNear: "#131a2e",
+    sky: ["#02040f", "#0a1642", "#20489c", "#7aa0dc"],
+    horizonGlow: "130,176,248",
+    horizonGlowAlpha: 0.44,
+    hillFar: "#2f4a80",
+    hillMid: "#1c2e55",
+    hillNear: "#0f1930",
     skyline: "castle",
-    skylineColor: "#0d1224",
-    windowColor: "rgba(255,180,80,0.55)",
-    cloudColor: "120,132,170",
-    cloudAlpha: 0.3,
-    cloudCount: 9,
+    skylineColor: "#080d1c",
+    skylineFar: "#2b4068",
+    windowColor: "rgba(255,174,58,0.92)",
+    cloudColor: "138,158,206",
+    cloudAlpha: 0.34,
+    cloudCount: 11,
     sun: null,
-    moon: { xFrac: 0.72, yOffset: 250, color: "226,232,255", radius: 74 },
-    stars: 150,
-    starColor: "#dfe6ff",
-    haze: "40,52,92",
-    ground: "#1f2a24",
-    groundTop: "#2f4a33",
-    rock: "#2a2a30",
-    rockTop: "#3d3d46",
+    moon: { xFrac: 0.72, yOffset: 250, color: "232,240,255", radius: 78 },
+    stars: 170,
+    starColor: "#eaf1ff",
+    haze: "70,110,190",
+    ground: "#263b34",
+    groundTop: "#4fae7e",
+    rock: "#2e3442",
+    rockTop: "#4d566b",
+    underground: "#05090f",
+    foreground: "#050912",
+    foregroundKind: "bones",
+    ambient: "#1a3a7a",
+    ambientAlpha: 0.2,
     vegetation: true,
-    ambient: "#1a2450",
-    ambientAlpha: 0.22,
   },
 
+  /**
+   * Xenoform Basin — violet and acid, and nothing in between.
+   *
+   * Built on the one complementary pair no other world in the game uses: magenta sky
+   * against lime ground. They are near-equal in value, so the horizon has to be carried
+   * by chroma alone — which is why the surface line is the most saturated colour
+   * anywhere in the game and the ridge under it is the least. Soil stays violet rather
+   * than going green, so the lime reads as a *crust* growing on something else.
+   */
   alien: {
     id: "alien",
-    sky: ["#160c2b", "#2c1450", "#4a2a5e", "#6d5a4a"],
-    hillFar: "#3f2a5c",
-    hillNear: "#2a1c40",
+    sky: ["#0d0126", "#3a077a", "#8f1094", "#ff4fa4"],
+    horizonGlow: "255,120,196",
+    horizonGlowAlpha: 0.52,
+    hillFar: "#6d1f86",
+    hillMid: "#460f63",
+    hillNear: "#280b3e",
     skyline: "spires",
-    skylineColor: "#1d1230",
-    windowColor: "rgba(150,255,170,0.4)",
-    cloudColor: "150,110,190",
-    cloudAlpha: 0.34,
-    cloudCount: 12,
-    sun: { xFrac: 0.26, yOffset: 330, color: "180,255,190", radius: 200 },
-    moon: { xFrac: 0.78, yOffset: 200, color: "255,190,220", radius: 52 },
-    stars: 90,
-    starColor: "#d7ffe6",
-    haze: "110,200,120",
-    ground: "#2e2340",
-    groundTop: "#4c7a45",
-    rock: "#332747",
-    rockTop: "#4a3a62",
+    skylineColor: "#170422",
+    skylineFar: "#93379b",
+    windowColor: "rgba(180,255,110,0.85)",
+    cloudColor: "186,104,214",
+    cloudAlpha: 0.42,
+    cloudCount: 13,
+    sun: { xFrac: 0.26, yOffset: 330, color: "196,255,160", radius: 230 },
+    moon: { xFrac: 0.78, yOffset: 200, color: "255,196,226", radius: 54 },
+    stars: 110,
+    starColor: "#ffd9f2",
+    haze: "150,86,190",
+    ground: "#3a2166",
+    groundTop: "#aaff2e",
+    rock: "#2e2044",
+    rockTop: "#5b3f7e",
+    underground: "#0c041a",
+    foreground: "#140a20",
+    foregroundKind: "fungal",
+    ambient: "#8a2eff",
+    ambientAlpha: 0.08,
     vegetation: true,
-    ambient: "#2e7a44",
-    ambientAlpha: 0.1,
   },
 
+  /**
+   * Ares Colony — butterscotch sky, rust ground, cold light in the windows.
+   *
+   * Mars is one hue family top to bottom, so it lives or dies on value separation:
+   * every band is a clean step, maroon at the top down to near-black bedrock. The only
+   * colour that breaks the family is the cyan in the habitat lights, and that is
+   * deliberate — one cold accent is what stops an all-orange frame reading as a smear,
+   * and it happens to match the off-white `hull` panelling the level is built from.
+   */
   mars: {
     id: "mars",
-    sky: ["#3a1c14", "#6e3320", "#a85c33", "#d9a06a"],
-    hillFar: "#8a4a2c",
-    hillNear: "#63321e",
+    sky: ["#3f0d0a", "#b0441a", "#f08a33", "#ffe0a8"],
+    horizonGlow: "255,190,112",
+    horizonGlowAlpha: 0.5,
+    hillFar: "#c4703a",
+    hillMid: "#94441c",
+    hillNear: "#6b2a11",
     skyline: "mesa",
-    skylineColor: "#4a2417",
-    windowColor: "rgba(255,255,255,0)",
-    cloudColor: "210,150,110",
-    cloudAlpha: 0.22,
-    cloudCount: 7,
-    sun: { xFrac: 0.68, yOffset: 320, color: "255,235,200", radius: 130 },
+    skylineColor: "#722c12",
+    skylineFar: "#cc8155",
+    windowColor: "rgba(126,232,255,0.8)",
+    cloudColor: "236,180,132",
+    cloudAlpha: 0.3,
+    cloudCount: 9,
+    sun: { xFrac: 0.68, yOffset: 320, color: "255,240,208", radius: 160 },
     moon: null,
-    stars: 40,
-    starColor: "#ffd9c0",
-    haze: "220,150,100",
-    ground: "#7a3b22",
-    groundTop: "#a35a30",
-    rock: "#5e2d1a",
-    rockTop: "#8a4425",
+    stars: 55,
+    starColor: "#ffe0c8",
+    haze: "245,172,110",
+    ground: "#963f1c",
+    groundTop: "#e07b34",
+    rock: "#5e3320",
+    rockTop: "#93542e",
+    underground: "#1c0703",
+    foreground: "#2a0f06",
+    foregroundKind: "rock",
+    ambient: "#ff7a3c",
+    ambientAlpha: 0.08,
     // Nothing grows on Mars.
     vegetation: false,
   },

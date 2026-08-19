@@ -19,7 +19,7 @@ import type { PhysOwner, RAPIER } from "../core/physics";
  * transformed back each frame, and it is discarded the moment the body is destroyed.
  */
 
-export type DecalKind = "blood" | "scorch" | "wet";
+export type DecalKind = "blood" | "scorch" | "wet" | "dust";
 
 /** Ties a mark to the body it was painted on, in that body's local frame. */
 export interface DecalAnchor {
@@ -37,6 +37,12 @@ interface Decal {
   /** Painted-on rotation; the anchor's rotation is added on top. */
   angle0: number;
   angle: number;
+  /**
+   * How far the mark is drawn out along `angle`. 1 is a round splat; a high-speed hit
+   * throws blood *somewhere*, and a streak pointing back the way the round came is the
+   * cheapest read there is on which direction a body was hit from.
+   */
+  stretch: number;
   anchor: DecalAnchor | null;
   /** Grows in over `spread` seconds so a pool visibly seeps outward. */
   grown: number;
@@ -110,9 +116,29 @@ export class Decals {
   blood(x: number, y: number, r: number, color = "#8e1220", anchor: DecalAnchor | null = null) {
     const a = rand(0, TAU);
     this.push({
-      kind: "blood", x, y, r, angle0: a, angle: a, anchor,
+      kind: "blood", x, y, r, angle0: a, angle: a, anchor, stretch: 1,
       grown: 0, spread: rand(0.5, 1.4),
       life: 90, maxLife: 90, alpha: rand(0.55, 0.8), color, seed: Math.random() * 900,
+    });
+  }
+
+  /**
+   * Blood thrown along `(dx, dy)` rather than pooled under a wound.
+   *
+   * Seeps in fast — a spray lands at the speed the round was travelling, and a streak
+   * that grows in over a second reads as the wall bleeding rather than as something
+   * being hit. Stretch is capped at 4 because past that the ellipses separate visibly
+   * into beads instead of holding together as one mark.
+   */
+  splatter(
+    x: number, y: number, dx: number, dy: number, r: number,
+    color = "#8e1220", anchor: DecalAnchor | null = null,
+  ) {
+    const a = Math.atan2(dy, dx);
+    this.push({
+      kind: "blood", x, y, r, angle0: a, angle: a, anchor, stretch: clamp(1.6 + r, 1.6, 4),
+      grown: 0, spread: rand(0.08, 0.22),
+      life: 90, maxLife: 90, alpha: rand(0.45, 0.7), color, seed: Math.random() * 900,
     });
   }
 
@@ -120,7 +146,7 @@ export class Decals {
   scorch(x: number, y: number, r: number, anchor: DecalAnchor | null = null) {
     const a = rand(0, TAU);
     this.push({
-      kind: "scorch", x, y, r, angle0: a, angle: a, anchor,
+      kind: "scorch", x, y, r, angle0: a, angle: a, anchor, stretch: 1,
       grown: r, spread: 0.001,
       life: 60, maxLife: 60, alpha: rand(0.3, 0.55), color: "#16120f", seed: Math.random() * 900,
     });
@@ -129,9 +155,26 @@ export class Decals {
   /** Dark wet patch under a soaking. Dries out in well under a minute. */
   wet(x: number, y: number, r: number, anchor: DecalAnchor | null = null) {
     this.push({
-      kind: "wet", x, y, r, angle0: 0, angle: 0, anchor,
+      kind: "wet", x, y, r, angle0: 0, angle: 0, anchor, stretch: 1,
       grown: r, spread: 0.001,
       life: 14, maxLife: 14, alpha: 0.28, color: "#20486b", seed: Math.random() * 900,
+    });
+  }
+
+  /**
+   * Pale settled dust where something heavy came down.
+   *
+   * Short-lived by decal standards — 22s — because dust is the one mark that should
+   * *not* still be there when you come back; it is the evidence that a collapse just
+   * happened, and a permanent one would read as terrain. Wide and low-alpha, so it
+   * spreads as a footprint rather than a splat.
+   */
+  dust(x: number, y: number, r: number, color = "#cbbda4", anchor: DecalAnchor | null = null) {
+    const a = rand(0, TAU);
+    this.push({
+      kind: "dust", x, y, r, angle0: a, angle: a, anchor, stretch: rand(1.5, 2.4),
+      grown: r * 0.2, spread: rand(0.3, 0.7),
+      life: 22, maxLife: 22, alpha: rand(0.14, 0.26), color, seed: Math.random() * 900,
     });
   }
 
@@ -184,16 +227,24 @@ export class Decals {
       const a = d.alpha * fade;
       if (a < 0.01 || d.grown <= 0.01) continue;
       ctx.fillStyle = rgba(d.color, a);
+      // Offsets are laid out along the mark's own axis and rotated into world space, so
+      // a stretched mark strings its blobs out down the direction of travel instead of
+      // fattening sideways. Two trig calls per mark, hoisted out of the blob loop.
+      const c = Math.cos(d.angle);
+      const s = Math.sin(d.angle);
       // Three offset ellipses per mark: an irregular splat rather than a circle,
       // seeded off the decal so it never crawls between frames.
       for (let k = 0; k < 3; k++) {
         const h1 = hash01(d.seed + k * 7.7);
         const h2 = hash01(d.seed + k * 13.3);
         const rr = d.grown * (0.55 + h1 * 0.55);
-        const ox = (h1 - 0.5) * d.grown * 1.1;
-        const oy = (h2 - 0.5) * d.grown * 0.5;
+        const lx = (h1 - 0.5) * d.grown * 1.1 * d.stretch;
+        const ly = (h2 - 0.5) * d.grown * 0.5;
         ctx.beginPath();
-        ctx.ellipse(d.x + ox, d.y + oy, rr, rr * (0.34 + h2 * 0.22), d.angle, 0, TAU);
+        ctx.ellipse(
+          d.x + lx * c - ly * s, d.y + lx * s + ly * c,
+          rr * d.stretch, rr * (0.34 + h2 * 0.22), d.angle, 0, TAU,
+        );
         ctx.fill();
       }
     }

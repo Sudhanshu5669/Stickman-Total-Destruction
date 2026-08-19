@@ -30,6 +30,14 @@ const TIER_METRES = 165;
 const PACKING = 0.92;
 /** Never overlap by more than this, however wide the chunk. */
 const MAX_OVERLAP = 2.4;
+/**
+ * Metres of hand-authored world in front of the spawn, before the deck takes over.
+ *
+ * See `openingSetPiece`. The director used to start dealing 24m out, which meant the
+ * first thing every run showed was whatever tier 0 happened to deal into an empty
+ * field — and tier 0 is crates.
+ */
+const OPENING = 40;
 
 interface Loaded {
   /** Range into `Builder.spawned` that this chunk owns. */
@@ -82,7 +90,7 @@ export class EndlessDirector implements Actor {
     this.seededRun = seed !== undefined;
     this.rng = mulberry32(seed ?? ((Math.random() * 0xffffffff) >>> 0));
     this.startX = info.spawn.x;
-    this.frontier = info.spawn.x + 24;
+    this.frontier = info.spawn.x + OPENING;
     // Build the opening stretch immediately so the player never sees the seam.
     this.fill(this.frontier + AHEAD);
   }
@@ -182,6 +190,50 @@ export class EndlessDirector implements Actor {
   destroy() {}
 }
 
+/** One storey of `Builder.tower`; needed to line the opening skybridge up. */
+const FLOOR_PITCH = 1.8 + 0.34;
+
+/**
+ * The starting line, authored rather than dealt.
+ *
+ * This is the one placement in the mode that every single run sees, so it is the one
+ * placement that cannot be left to the deck. It is built to the same rule as the
+ * playground worlds: a manned pair of towers about fourteen metres out — inside the
+ * camera's forty-metre window — with the fuse on the ground between them and a crowd
+ * standing at the near end. A run now opens mid-collapse instead of mid-walk.
+ *
+ * @param s World x of the spawn. Everything here is placed relative to it.
+ */
+function openingSetPiece(b: Builder, s: number, g: number) {
+  // Softer than the mode's default arm and slow to react: the opening crowd is scenery
+  // that shoots back eventually, not an ambush on a player who has not moved yet.
+  b.crowd(s + 6, g, ["grunt", "guard", "grunt"], 1.9,
+    { behavior: "patrol", patrol: 4, gun: "smg", range: 18, spread: 0.22, reaction: 1.6 });
+  // Eleven metres out: within reach of a shot fired level from the spawn, outside the
+  // 6.5m blast it sets off.
+  b.explosiveStack(s + 11, g, 4);
+
+  b.tower({
+    x: s + 17, baseY: g, floors: 8, width: 4.4, material: "concrete",
+    slab: "metal", windows: true, guards: ["grunt", "guard"],
+  });
+  b.enemy("grunt", s + 15.9, g, -1);
+  b.enemy("guard", s + 18.1, g, 1);
+
+  b.tower({
+    x: s + 27, baseY: g, floors: 12, width: 4.8, material: "concrete",
+    slab: "metal", windows: true, goldTop: true, guards: ["guard", "grunt"],
+  });
+
+  const sky = g + FLOOR_PITCH * 5 + 0.18;
+  b.catwalk(s + 19.2, s + 24.6, sky);
+  b.enemy("grunt", s + 22, sky + 0.2, -1);
+  b.explosiveStack(s + 22, g, 5);
+
+  b.teeter(s + 31.5, g, 5, 0.85, "wood");
+  b.crowd(s + 35, g, ["grunt", "grunt"], 2.0);
+}
+
 /**
  * Endless is a level like any other: it just builds almost nothing up front and
  * hands the rest to a director actor that keeps building as you walk.
@@ -191,12 +243,15 @@ function build(game: GameCtx, b: Builder, seed?: number): LevelInfo {
   // Everything that spawns out here is armed. The mode is a gauntlet, not a sandbox.
   b.defaultCombat = combat({ behavior: "patrol", gun: "smg", range: 26, spread: 0.14, interval: 0.42, patrol: 6 });
 
-  // A short, safe apron behind the spawn so you have somewhere to back into.
-  b.groundRun(-14, G0 - 3, 60, 6);
-  b.ledge(-30, G0 + 2.4, 10, 1.2);
+  const spawnX = -8;
+  // A short, safe apron behind the spawn, plus ground under the authored opening —
+  // the director's own streaming starts one full set-piece further out.
+  b.groundRun(spawnX + (OPENING - 38) / 2, G0 - 3, OPENING + 38, 6);
+  b.ledge(spawnX - 22, G0 + 2.4, 10, 1.2);
+  openingSetPiece(b, spawnX, G0);
 
   const info: LevelInfo = {
-    spawn: v(-8, G0 + 1.2),
+    spawn: v(spawnX, G0 + 1.2),
     bounds: { min: -40, max: 60 },
     enemies: b.enemies,
     groundY: G0,

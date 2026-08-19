@@ -43,9 +43,15 @@ const FLOOR_PITCH = 1.8 + 0.34;
 // Breathing room — flat stretches so a run has a rhythm instead of a wall of stuff.
 // ---------------------------------------------------------------------------
 
-for (const [w, n] of [[14, 0], [20, 2], [26, 4], [32, 6]] as const) {
+// Breathing room, but never *nothing*. `clearing-14` used to place no actors at all,
+// and the widest cleared thirty-two metres of world without a single thing to shoot —
+// which, dealt back to back, is the one failure this mode cannot survive. They still
+// read as a gap in the skyline; they just always have something in them.
+for (const [w, n] of [[14, 3], [20, 5], [26, 7], [32, 9]] as const) {
   def(`clearing-${w}`, w, 0, (b, x, g) => {
-    if (n) b.scatter(x + w / 2, g, n, w * 0.3, ["wood", "wood", "glass"]);
+    b.scatter(x + w / 2, g, n, w * 0.3, ["wood", "wood", "glass", "explosive"]);
+    b.teeter(x + w * 0.15, g, 4, 0.8, "wood");
+    b.enemy("grunt", x + w * 0.72, g, -1);
   });
 }
 
@@ -77,7 +83,7 @@ for (const [name, mats] of YARD_MIXES) {
 
 for (const stacks of [2, 3, 4]) {
   for (const height of [3, 5, 7]) {
-    def(`barrel-farm-${stacks}x${height}`, 16, 1, (b, x, g) => {
+    def(`barrel-farm-${stacks}x${height}`, 16, 0, (b, x, g) => {
       for (let i = 0; i < stacks; i++) b.explosiveStack(x + 4 + i * 3.4, g, height);
       b.enemy("grunt", x + 13, g, -1, { behavior: "sentry", gun: "smg", range: 22, spread: 0.16 });
     });
@@ -91,7 +97,7 @@ for (const stacks of [2, 3, 4]) {
 const PYRAMID_MATS: MaterialId[] = ["wood", "brick", "concrete", "ice", "sandstone", "gold"];
 for (const mat of PYRAMID_MATS) {
   for (const [rows, size] of [[4, 0.7], [6, 0.85], [8, 0.95]] as const) {
-    def(`pyramid-${mat}-${rows}`, 16, mat === "gold" ? 2 : 0, (b, x, g) => {
+    def(`pyramid-${mat}-${rows}`, 16, mat === "gold" ? 1 : 0, (b, x, g) => {
       b.pyramid(x + 8, g, rows, size, mat);
       if (rows > 4) b.enemy("guard", x + 2, g, -1);
     });
@@ -184,7 +190,7 @@ for (const mat of ["concrete", "hull", "metal", "brick"] as MaterialId[]) {
 // A cluster of three, staggered — the skyline chunk.
 for (const mat of ["concrete", "hull", "brick"] as MaterialId[]) {
   for (const scale of [1, 1.4] as const) {
-    def(`skyline-${mat}-${scale}`, 40, 3, (b, x, g) => {
+    def(`skyline-${mat}-${scale}`, 40, 2, (b, x, g) => {
       const f = (n: number) => Math.round(n * scale);
       b.tower({ x: x + 8, baseY: g, floors: f(8), width: 4.4, material: mat, slab: "metal", windows: true, guards: ["guard", "grunt"] });
       b.tower({ x: x + 20, baseY: g, floors: f(12), width: 5.0, material: mat, slab: "metal", windows: true, guards: ["boss", "guard"], goldTop: true });
@@ -239,7 +245,7 @@ for (const [roof, height, guards] of [
   [true, 16, ["boss", "guard"]],
 ] as [boolean, number, EnemyKind[]][]) {
   for (const mat of ["concrete", "sandstone", "metal"] as MaterialId[]) {
-    def(`keep-${mat}-${height}`, 16, height > 8 ? 2 : 1, (b, x, g) => {
+    def(`keep-${mat}-${height}`, 16, height > 8 ? 1 : 0, (b, x, g) => {
       b.castleTower({ x: x + 8, baseY: g, w: 5.2, height, material: mat, roof, guards });
       b.decor(x + 2, g + 0.2, "torch", "#ffb03a");
     });
@@ -252,7 +258,7 @@ for (const [roof, height, guards] of [
 
 for (const [span, piers, depth] of [[16, 4, 7], [22, 5, 9], [30, 7, 12]] as const) {
   for (const mat of ["wood", "metal", "concrete"] as MaterialId[]) {
-    def(`bridge-${mat}-${span}`, span + 10, 1, (b, x, g) => {
+    def(`bridge-${mat}-${span}`, span + 10, 0, (b, x, g) => {
       const x1 = x + 5;
       const x2 = x + 5 + span;
       b.bridge(x1, x2, g + 0.4, mat, piers, g - depth);
@@ -275,6 +281,66 @@ for (const [h1, h2] of [[2.4, 5.0], [3.6, 7.2], [5.0, 9.5]] as const) {
 }
 
 // ---------------------------------------------------------------------------
+// Chain reactions
+//
+// The rest of the deck is authored as objects: a tower, a wall, a yard. These are
+// authored as *fuses*. Everything in them is spaced inside its own failure radius, so
+// the interesting question is never "can I break this" but "which way does it go" —
+// and because the answer is solved rather than scripted, the same chunk dealt twice
+// does not play out twice. They are tier 0 on purpose: they are the loudest thing in
+// the deck and none of them is any more dangerous than a crate yard.
+// ---------------------------------------------------------------------------
+
+// A row of narrow towers pitched at well under their own height. Whichever end goes
+// first, the rest follow; where the row stops is up to the solver.
+const DOMINO_KITS: [string, MaterialId, MaterialId][] = [
+  ["office", "concrete", "metal"],
+  ["oldtown", "brick", "concrete"],
+  ["industrial", "hull", "metal"],
+];
+for (const [name, mat, slab] of DOMINO_KITS) {
+  for (const [n, floors] of [[5, 6], [6, 8], [7, 5]] as const) {
+    def(`domino-${name}-${n}x${floors}`, n * 5 + 10, 0, (b, x, g) => {
+      for (let i = 0; i < n; i++) {
+        b.tower({
+          x: x + 6 + i * 5, baseY: g, floors: floors + (i % 2), width: 3.2,
+          material: mat, slab, windows: true, guards: [i % 2 ? "guard" : "grunt"],
+        });
+      }
+      // At the near end, so a shot that arrives from the left starts the sequence.
+      b.explosiveStack(x + 3.5, g, 4);
+      b.enemy("grunt", x + n * 5 + 7, g, -1);
+    });
+  }
+}
+
+// A tower standing on a plinth with powder at both ends of it: two independent paths
+// to the same collapse, so a miss on one side still finds the other.
+for (const [mat, floors] of [["brick", 9], ["concrete", 12], ["hull", 14]] as [MaterialId, number][]) {
+  def(`powderkeg-${mat}-${floors}`, 26, 0, (b, x, g) => {
+    b.wall(x + 13, g, 12, 2.4, mat, 0.8);
+    b.tower({
+      x: x + 13, baseY: g + 2.4, floors, width: 4.4, material: mat, slab: "metal",
+      windows: true, guards: ["guard", "grunt"], goldTop: true,
+    });
+    b.explosiveStack(x + 5.5, g, 5);
+    b.explosiveStack(x + 20.5, g, 5);
+    // In the ground-floor bays, on the plinth, between the columns.
+    b.crowd(x + 13, g + 2.5, ["grunt", "grunt"], 2.4);
+    b.teeter(x + 23.5, g, 4, 0.8, "wood");
+  });
+}
+
+// Nothing here is anchored. It is already leaning when the chunk loads.
+for (const [mat, count] of [["wood", 7], ["brick", 6], ["sandstone", 8]] as [MaterialId, number][]) {
+  def(`teetering-${mat}-${count}`, 22, 0, (b, x, g) => {
+    for (let i = 0; i < 4; i++) b.teeter(x + 5 + i * 3.6, g, count - (i % 2), 0.85, mat);
+    b.explosiveStack(x + 19, g, 3);
+    b.enemy("grunt", x + 2.5, g, 1);
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Alien / Martian set dressing, so the run doesn't stay one colour of building
 // ---------------------------------------------------------------------------
 
@@ -292,7 +358,7 @@ for (const [r, mat] of [[5.5, "biomass"], [7, "hull"], [9, "hull"]] as [number, 
 
 for (const [h, w, lean] of [[10, 1.8, 0.05], [14, 2.2, -0.04], [18, 2.6, 0.03]] as const) {
   for (const mat of ["crystal", "metal", "hull"] as MaterialId[]) {
-    def(`spire-${mat}-${h}`, 18, 1, (b, x, g) => {
+    def(`spire-${mat}-${h}`, 18, 0, (b, x, g) => {
       b.spire(x + 6, g, h, w, mat, lean);
       b.spire(x + 13, g, h * 0.7, w * 0.8, mat, -lean);
       b.enemy("guard", x + 9.5, g, -1, { behavior: "hunter", gun: "smg", range: 28, standoff: 11, spread: 0.12 });
@@ -419,7 +485,7 @@ const DISTRICT_KITS: [string, MaterialId, MaterialId][] = [
 for (const [name, mat, slab] of DISTRICT_KITS) {
   // Two densities of the same block: a low-rise grid and a proper high-rise wall.
   for (const [tag, pitch, base, step, tier] of [
-    ["lowrise", 6.2, 4, 1, 2],
+    ["lowrise", 6.2, 4, 1, 1],
     ["highrise", 6.2, 9, 2, 3],
   ] as const) {
     // 42m wide with the outermost tower ending 4m short of the edge — the margin the
@@ -475,7 +541,7 @@ for (const [mat, roof, len] of [
   ["concrete", "brick", 6],
   ["sandstone", "concrete", 5],
 ] as [MaterialId, MaterialId, number][]) {
-  def(`terrace-row-${mat}-${len}`, len * 6 + 6, 1, (b, x, g) => {
+  def(`terrace-row-${mat}-${len}`, len * 6 + 6, 0, (b, x, g) => {
     for (let i = 0; i < len; i++) {
       const hx = x + 5 + i * 6;
       b.house({ x: hx, baseY: g, w: 5.6, h: 3.4 + (i % 3) * 0.6, material: mat, roof });
@@ -487,7 +553,7 @@ for (const [mat, roof, len] of [
 
 // A stacked shelf of towers on a plinth — density in the vertical, too.
 for (const mat of ["concrete", "hull", "brick"] as MaterialId[]) {
-  def(`tiered-${mat}`, 30, 3, (b, x, g) => {
+  def(`tiered-${mat}`, 30, 2, (b, x, g) => {
     b.wall(x + 15, g, 22, 2.6, mat, 0.8);
     const top = g + 2.6;
     for (let i = 0; i < 4; i++) {
@@ -521,7 +587,11 @@ export const CHUNKS_BY_TIER: readonly (readonly Chunk[])[] = [0, 1, 2, 3].map(
 export function chunkWeight(c: Chunk): number {
   if (c.id.startsWith("clearing")) return 1;
   if (c.id.startsWith("district") || c.id.startsWith("tiered") || c.id.startsWith("terrace-row")) return 14;
+  // Weighted with the districts rather than below them: these are the chunks that make
+  // the mode's best moment — a collapse you did not fully author — come up often.
+  if (c.id.startsWith("domino") || c.id.startsWith("powderkeg")) return 12;
   if (c.id.startsWith("skyline") || c.id.startsWith("citadel") || c.id.startsWith("twins")) return 7;
+  if (c.id.startsWith("teetering")) return 5;
   if (c.id.startsWith("tower") || c.id.startsWith("keep") || c.id.startsWith("hamlet")) return 4;
   if (c.id.startsWith("yard") || c.id.startsWith("patrol") || c.id.startsWith("crystals")) return 1;
   return 2;

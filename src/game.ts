@@ -377,8 +377,25 @@ export class Game implements GameCtx {
     }
   }
 
+  /**
+   * Chain multiplier, on a square root rather than a straight line.
+   *
+   * Linear made the top of the curve the only part worth anything: 0.14 per link meant
+   * a 37-chain for the 6x cap and, far worse, 1.14x for the *second* link — so the
+   * ordinary five-to-ten chain that makes up almost every destruction in the game paid
+   * essentially nothing, and the player never learned the mechanic existed.
+   *
+   * A square root front-loads it. The fourth link has already doubled the score, which
+   * is early enough to be felt and therefore learned, and the curve keeps climbing
+   * instead of flattening — a tower that takes eighty blocks with it is still worth
+   * more than one that takes forty. The 8x ceiling needs a 129-chain and exists only to
+   * bound the arithmetic; nothing but a genuine massacre reaches it.
+   *
+   *   chain    2     3     4     5     8    10    20    40    75   129
+   *   mult   1.62  1.88  2.07  2.24  2.64  2.86  3.70  4.87  6.33  8.00
+   */
   get comboMultiplier() {
-    return clamp(1 + (this.combo - 1) * 0.14, 1, 6);
+    return clamp(1 + 0.62 * Math.sqrt(Math.max(0, this.combo - 1)), 1, 8);
   }
 
   hitstop(seconds: number) {
@@ -441,7 +458,10 @@ export class Game implements GameCtx {
       this.kills++;
       this.level.director?.countKill();
     }
-    if (this.combo === 10 || this.combo === 25 || this.combo === 50 || this.combo === 100) {
+    // First callout at 5 lands inside an ordinary collapse, so the chain mechanic is
+    // taught on the first building the player brings down rather than never.
+    if (this.combo === 5 || this.combo === 10 || this.combo === 20 || this.combo === 35
+      || this.combo === 50 || this.combo === 75 || this.combo === 100) {
       this.particles.popup(at.x, at.y + 2, `${this.combo} CHAIN!`, "#ffd23f", 0.95);
       sfx.levelUp();
     }
@@ -530,7 +550,13 @@ export class Game implements GameCtx {
     }
 
     if (this.comboTimer > 0) {
-      this.comboTimer -= rawDt * 0.62;
+      // 2.38s, up from 1.61s. At the old rate a player firing the artillery could not
+      // chain two shots at all — the plane's own cooldown is 2.3s — so the rounds with
+      // the most spectacle were the ones least able to build a multiplier. This also
+      // survives the pause between a tower's first break and the cascade hitting the
+      // ground. The nuke and black hole still fall outside it, and should: they each
+      // generate a hundred-link chain unaided and need no bridge.
+      this.comboTimer -= rawDt * 0.42;
       if (this.comboTimer <= 0) {
         this.comboTimer = 0;
         this.combo = 0;
@@ -925,6 +951,12 @@ export class Game implements GameCtx {
       this.paused = !this.paused;
       this.canvas.style.cursor = this.paused ? "default" : "none";
       if (this.paused) this.touch.release();
+      // The portal's gameplay bracket has to bound *actual play*, not the whole time
+      // the level is loaded. It suppresses interruptions between the two calls, so
+      // leaving it open across a pause both mis-reports our engagement and throws away
+      // the one window the portal is allowed to use.
+      if (this.paused) portal.gameplayStop();
+      else portal.gameplayStart();
       sfx.ui(!this.paused);
       this.input.consumeEdges();
     }

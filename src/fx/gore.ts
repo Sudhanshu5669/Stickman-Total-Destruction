@@ -3,7 +3,8 @@ import type { Ragdoll } from "../entities/ragdoll";
 import { clamp, rand, v, type V } from "../core/math";
 import { G, ig } from "../core/physics";
 import { sfx } from "./audio";
-import { anchorAt } from "./decals";
+import { anchorAt, canMark } from "./decals";
+import { kill as juiceKill } from "./juice";
 
 /**
  * Everything that happens to a body after it stops being a body.
@@ -27,10 +28,19 @@ const LITE_LIMBS = ["armFront", "armBack", "legFront", "legBack"];
  * A wet burst of blood, thrown along `dir`. Deliberately over-committed: two layers
  * of droplets at different speeds and sizes, plus a fine mist that hangs in the air.
  */
-export function bloodBurst(game: GameCtx, at: V, dir: V | undefined, amount: number, color = "#c0263a") {
+export function bloodBurst(
+  game: GameCtx, at: V, dir: V | undefined, amount: number, color = "#c0263a",
+  velX = 0, velY = 0,
+) {
   const n = clamp(Math.round(amount), 3, 90);
   game.particles.blood(at.x, at.y, n, dir, 11, color);
   game.particles.blood(at.x, at.y, Math.round(n * 0.55), dir, 22, color);
+  // A body that is already moving throws its blood downrange rather than straight out.
+  // A third of the carrier's velocity: enough to lean the burst visibly, not so much
+  // that the spray outruns the corpse it came from.
+  if (velX !== 0 || velY !== 0) {
+    game.particles.spray(at.x, at.y, Math.max(2, n >> 2), velX, velY, 2, color, 0.5, velX / 3, velY / 3);
+  }
   // Fine mist: small and fast-fading, the part that reads as spray rather than dots.
   // It still falls at a decent clip — mist that hangs around too long stops looking
   // like blood in the air and starts looking like blood stuck in the air.
@@ -61,6 +71,25 @@ export function bloodPool(game: GameCtx, at: V, radius: number, color = "#8e1220
 }
 
 /**
+ * Throws blood *downrange* and paints it on whatever stops it.
+ *
+ * A pool under the wound says a body bled here. A streak up the wall behind it says the
+ * round went through, which is a different and better sentence. Raycast along the throw
+ * so the mark lands on real geometry — and only on geometry that will still be there,
+ * which is what `canMark` is for.
+ */
+export function bloodSplatter(game: GameCtx, at: V, dir: V, reach = 4, color = "#8e1220") {
+  const l = Math.hypot(dir.x, dir.y);
+  if (l < 1e-6) return;
+  const d = v(dir.x / l, dir.y / l);
+  const hit = game.physics.rayCast(at, d, reach, ig(G.SENSOR, G.TERRAIN | G.BLOCK));
+  if (!hit || !canMark(hit.owner)) return;
+  const x = hit.point.x - d.x * 0.05;
+  const y = hit.point.y - d.y * 0.05;
+  game.decals.splatter(x, y, d.x, d.y, rand(0.3, 0.7), color, anchorAt(hit.owner, hit.body, x, y));
+}
+
+/**
  * Takes limbs off a skeleton in proportion to how hard it was hit.
  *
  * `damage` is the size of the blow relative to what the body could take: 1 is exactly
@@ -86,19 +115,26 @@ export function severLimbs(game: GameCtx, r: Ragdoll, damage: number): number {
 
   let cut = 0;
   const color = r.splatColor;
+  const c = r.center();
+  const vel = r.velocity();
   for (const name of pool) {
     if (cut >= want) break;
     const p = r.sever(name);
     if (!p) continue;
     cut++;
-    bloodBurst(game, p, undefined, 26, color);
+    bloodBurst(game, p, undefined, 26, color, vel.x, vel.y);
     bloodPool(game, p, rand(0.5, 1.1), color);
-    game.particles.shards(p.x, p.y, 5, "#e8dcc4", 5);
+    // Bone shards leave along the axis the limb was torn off, i.e. out from the pelvis,
+    // rather than in a ball — a limb that came off has a direction and should show it.
+    game.particles.spray(p.x, p.y, 5, p.x - c.x, p.y - c.y, 5, "#e8dcc4", 0.8, vel.x * 0.3, vel.y * 0.3);
+    bloodSplatter(game, p, vel, 4, "#8e1220");
   }
 
   if (cut > 0) {
-    game.camera.addTrauma(0.18 + cut * 0.06);
-    game.hitstop(0.04);
+    // One curve for every violent thing in the game — see `fx/juice`. Dismemberment is
+    // graded on the same overkill ratio that decided how many limbs came off, so the
+    // response and the damage can never disagree about how bad it was.
+    juiceKill(game, c, over, vel.x, vel.y, color);
     sfx.splat();
     sfx.gib();
   }

@@ -38,9 +38,40 @@ export class Weapon {
   private reserves = new Map<string, number>();
   /** Set while the trigger is held so semi-auto ammo needs a re-press. */
   private triggerLatched = false;
+  /**
+   * Rounds already paid their first-use bounty, mirrored from storage at construction.
+   *
+   * The continuous weapons ask about this every frame the trigger is down, so the hot
+   * path has to be a `Set` lookup — going to `localStorage` sixty times a second to be
+   * told "no" would be the most expensive thing in the frame.
+   */
+  private readonly usedRounds: Set<string>;
 
   constructor() {
     for (const a of AMMO) if (a.reserve >= 0) this.reserves.set(a.id, a.reserve);
+    this.usedRounds = progress.usedRounds();
+  }
+
+  /**
+   * Pays a one-off bounty the first time each round is ever fired.
+   *
+   * Eighteen rounds is only an arsenal if the player tries them. Left alone, most
+   * players find three they like in the first minute and never press `4` again, which
+   * quietly deletes two thirds of the game — so curiosity gets paid for, once per round,
+   * for as long as the save lives.
+   *
+   * The bounty goes through `award` rather than straight to carnage so it lands in the
+   * run score, banks with everything else, and shows its true post-multiplier value; the
+   * popup above it is what explains where the number came from.
+   */
+  private payFirstUse(game: GameCtx, a: AmmoDef, at: V) {
+    if (this.usedRounds.has(a.id)) return;
+    this.usedRounds.add(a.id);
+    const bounty = progress.firstUse(a.id);
+    if (bounty <= 0) return;
+    game.particles.popup(at.x, at.y + 2.2, `FIRST STRIKE — ${a.name.toUpperCase()}`, "#ffd23f", 0.9);
+    game.award(bounty, at);
+    sfx.levelUp();
   }
 
   get ammo(): AmmoDef {
@@ -150,6 +181,7 @@ export class Weapon {
 
     a.onFire?.(game);
     sfx.shoot(a.heft);
+    this.payFirstUse(game, a, spawnAt);
 
     this.kick = 1;
     this.flash = 1;
@@ -182,6 +214,7 @@ export class Weapon {
     const dir = norm(aim);
     const spawnAt = muzzleSpawn(origin, dir, a.muzzle);
     a.stream!(game, spawnAt, dir, dt, facing);
+    this.payFirstUse(game, a, spawnAt);
 
     this.kick = Math.max(this.kick, 0.3 + Math.random() * 0.12);
     this.flash = Math.max(this.flash, 0.35);

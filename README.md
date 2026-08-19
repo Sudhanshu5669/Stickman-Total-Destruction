@@ -238,10 +238,15 @@ poking.
 
 ## Known gaps / next steps
 
-- **Bundle size** is 837 KB gzipped, nearly all of it Rapier's base64-inlined WASM.
-  Switching to `@dimforge/rapier2d` (separate `.wasm` file) would cut that meaningfully and
-  parse faster, at the cost of needing a WASM plugin in the build.
-- **No mobile/touch controls**, and no CrazyGames SDK integration (ads, highscores) yet.
+- ~~**Bundle size**~~ — **closed, not a problem.** Measured at 2.34 MB raw / **848 KB
+  gzipped**, against CrazyGames' 20 MB mobile-homepage eligibility gate. We are at roughly
+  4% of the limit, and cold boot measures 677 ms against a 10 s budget. Do **not** migrate to
+  `@dimforge/rapier2d` (separate `.wasm`) to save size we do not need — the compat package
+  exists precisely to avoid bundler `.wasm` misconfiguration, and switching trades a
+  non-existent problem for a real load-time risk.
+- ~~**No mobile/touch controls / no CrazyGames SDK**~~ — **closed.** Both shipped:
+  `src/ui/touch.ts` and `src/platform/portal.ts` (ads, leaderboards, loading and gameplay
+  brackets, rewarded revive).
 - Endless has one palette (day) and one ground height. Chunks that change elevation or
   theme mid-run would help it read as a journey rather than a corridor.
 - Campaign objectives are all "clear the map". Escort, timed and defend variants would fit

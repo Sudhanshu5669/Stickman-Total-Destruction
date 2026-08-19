@@ -103,6 +103,8 @@ export class RigidProjectile implements Actor, PhysOwner {
   collider: RAPIER.Collider;
   private age = 0;
   private exploded = false;
+  /** Payload score is paid once, on the first thing the round actually does. */
+  private paid = false;
   private readonly cfg: ProjectileConfig;
   private attractLeft: number;
   /** Suppresses repeat impact SFX while a body grinds along a surface. */
@@ -257,7 +259,28 @@ export class RigidProjectile implements Actor, PhysOwner {
       this.game.particles.shards(point.x, point.y, 8, c.splat.color, 5);
     }
 
+    // Inert rounds are paid on contact; explosive ones are paid by `detonate` instead,
+    // so the number lands with the fireball rather than a frame before it.
+    if (kj > 0.5 && !c.explode) this.payOut(point);
     if (c.explode && kj >= c.explode.minEnergy) this.detonate();
+  }
+
+  /**
+   * Pays the payload's own score, once.
+   *
+   * Separate from the block and body points its impact generates: this is what the
+   * *round* is worth, and it is why a nuke reads as a nuke on the popup rather than as
+   * the sum of whatever happened to be standing inside the blast.
+   *
+   * This was declared and defaulted from the start but never actually read, so every
+   * rigid round — thirteen of the eighteen, including the nuke — has been scoring
+   * nothing for itself since launch. It is most of the reason the reward curve reads
+   * as flat.
+   */
+  private payOut(at: V) {
+    if (this.paid || this.cfg.points <= 0) return;
+    this.paid = true;
+    this.game.award(this.cfg.points, at);
   }
 
   /**
@@ -293,6 +316,7 @@ export class RigidProjectile implements Actor, PhysOwner {
     const e = this.cfg.explode;
     this.exploded = true;
     this.dead = true;
+    this.payOut(this.pos);
     if (!e) return;
 
     const p = this.pos;
@@ -426,7 +450,10 @@ export class CreatureProjectile implements Actor {
     bloodBurst(this.game, c, undefined, 30 + cut * 14, this.cfg.splatColor);
     bloodPool(this.game, c, rand(0.6, 1.2) + cut * 0.3, this.cfg.splatColor);
     this.game.particles.stars(c.x, c.y, 6);
-    this.game.award(this.cfg.points, c, `+${this.cfg.points}`);
+    // No explicit label: the hardcoded one was the *unmultiplied* number while the
+    // score actually added was multiplied, so mid-chain the popup under-reported at
+    // exactly the moment a big number matters most. Let `award` format the real value.
+    this.game.award(this.cfg.points, c);
     sfx.splat();
   }
 

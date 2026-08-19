@@ -93,6 +93,21 @@ export class Builder {
   }
 
   /**
+   * A line of stickmen centred on `x`, each turned to face the middle of the group.
+   *
+   * A structure with nobody in it is scenery; the same structure with six people
+   * standing under it is a target. Placing them one `enemy()` call at a time is how a
+   * level ends up with three inhabitants spread over two hundred metres, so populating
+   * a set-piece gets a verb of its own.
+   */
+  crowd(x: number, y: number, kinds: EnemyKind[], pitch = 1.9, arms?: CombatOptions | null) {
+    kinds.forEach((k, i) => {
+      const gx = x + (i - (kinds.length - 1) / 2) * pitch;
+      this.enemy(k, gx, y, gx > x ? -1 : 1, arms);
+    });
+  }
+
+  /**
    * A stack of floors: two columns and a slab per storey, with optional windows.
    * Tall ones genuinely become unstable — that is the fun.
    */
@@ -406,5 +421,25 @@ export class Builder {
     for (let i = 0; i < count; i++) {
       this.block(x, baseY + 0.42 + i * 0.84, 0.72, 0.82, "explosive");
     }
+  }
+
+  /**
+   * A free-standing stack with a little jitter in every course.
+   *
+   * Everything in it is loose from the first frame, so it is already leaning when the
+   * level loads and the solver — not the author — decides which way it goes. That is
+   * the point: a set-piece that fails identically every attempt is watched once, and a
+   * stack that falls differently every attempt is what a retry is *for*. Put these
+   * where a near miss still knocks something over.
+   */
+  teeter(x: number, baseY: number, count: number, size = 0.8, material: MaterialId = "wood") {
+    let y = baseY;
+    for (let i = 0; i < count; i++) {
+      const w = size * rand(0.85, 1.15);
+      const h = size * rand(0.8, 1.1);
+      this.loose(x + rand(-size * 0.22, size * 0.22), y + h / 2 + 0.02, w, h, material, rand(-0.09, 0.09));
+      y += h;
+    }
+    return y;
   }
 }
