@@ -3,10 +3,11 @@
 _Living working document. Owned by the Creative Director (lead agent). Every worker reads
 this before starting; the Director updates it after every wave._
 
-**Status:** Wave 1 complete and audited. Wave 2 (Director integration) mostly complete —
-every worker's dead/unwired hook is now live in `src/game.ts`. Remaining: a full manual
-playtest pass (T10), the tech-debt items in T11, and T13. See section 11.
-**Last updated:** 2026-08-20 (Wave 2 session)
+**Status:** Wave 1 complete and audited. Wave 2 (Director integration) complete. A manual
+browser playtest pass found and fixed two real bugs (coach FIRE prompt could stick forever;
+result card unlock-banner text could overflow its own box). Remaining: mobile/touch viewport
+(still unverified — see 12.3), T11, and T13. See sections 11 and 12.
+**Last updated:** 2026-08-20 (playtest session)
 
 ---
 
@@ -513,3 +514,70 @@ trigger `touchStreak()` returning non-null) — worth a manual check before ship
 3. T12: get a human (or the `omni-memory` tool) to refresh `AGENTS.md`'s memory block —
    the 6× combo cap it states is now stale (8×, square-root curve).
 4. T13: CEO demo build, once the manual playtest above is clean.
+
+---
+
+## 12. Playtest session (2026-08-20) — Claude in Chrome, two bugs found and fixed
+
+Picked up T10 (the manual playtest wave 2 left partial). Ran the dev server and drove it
+live through `claude-in-chrome`: boot, attract demo, PLAY, firing, campaign entry, and
+repeated forced result cards (via `window.game.finish()`, still exposed by `main.ts`) with
+localStorage manipulated to force big multi-unlock, medal and streak scenarios that a normal
+short session wouldn't reach. Both bugs below were reproduced live in the browser, fixed,
+and reproduced again post-fix to confirm.
+
+### 12.1 Coach's FIRE prompt could stay on screen forever (fixed)
+
+`Coach`'s first lesson dismisses on `s.firing`, which `game.ts`'s `coachInput()` set to
+`this.input.mouseDown` — a live, un-latched "is the button down right now" flag. `Input`
+also tracks `mousePressed`, a *latched* press edge that survives exactly for this reason
+(see the docblock on `core/input.ts`): a fast click/tap can complete (pointerdown then
+pointerup) before a single rendered frame runs, so by the time anything reads `mouseDown`
+it can already be back to `false` — even though the shot fired correctly (weapon-fire
+code reads the latched `mousePressed`, not raw `mouseDown`). Reproduced live: two real
+clicks landed hits (score moved, gore rendered) and the FIRE prompt never dismissed;
+`window.game.coach.idx` stayed `0` the whole time. Confirmed the completion logic itself
+was fine by feeding `Coach.update()` a forced `firing:true` directly — it advanced
+immediately, isolating the bug to the input signal, not the lesson logic.
+
+**Fix, in `game.ts`:** added `firedEdgeThisFrame`, sampled from `input.mousePressed` at the
+very top of `frame()` — before anything downstream (`simulate()`'s fixed-step loop) can
+`consumeEdges()` it away — and OR'd into `coachInput().firing`. Reproduced the original
+failing sequence again post-fix: the prompt now flips to its green checkmark state on the
+same click that used to leave it stuck.
+
+This is not purely a synthetic-click artifact — a real player's tap on a touchscreen (or a
+very fast physical click) can plausibly complete inside one frame too, so this was a live
+onboarding regression risk, not just a test-tooling quirk.
+
+### 12.2 Result card's unlock banner could overflow its own box (fixed)
+
+`Menu.drawUnlocks()` sized the "N NEW ROUNDS UNLOCKED" box from the icon row only
+(`totalW = ids.length * gs + gap...`) and then centre-drew the joined weapon-name string
+with no width check against that box at all. A run that clears several unlock rungs in one
+card — now easy with T6's medal/streak bonus stacking straight into the single earned-carnage
+number — produces a name list far wider than the icon row. Reproduced live by forcing a
+6-unlock result card: "PERFECT GAME" and "COLD STORAGE" rendered outside the box's left/right
+edges entirely, disconnected from its border. A forced 11-unlock card (large score from a
+fresh save) made it worse.
+
+**Fix, in `menu.ts`:** `drawUnlocks()` now measures the joined label and widens the box to
+fit it (up to the existing `w - 48*k` viewport ceiling), and if the label still doesn't fit
+at that ceiling, shrinks its font down (floor 0.6×) rather than letting it spill. Reproduced
+the 11-unlock case again post-fix: all eleven names now render fully inside the border at a
+smaller size.
+
+### 12.3 Still not verified
+
+- **Mobile/touch viewport.** `resize_window` on the Chrome tab changed the OS window but not
+  the actual rendered canvas viewport in this environment, and `touch.ts` gates on
+  `navigator.maxTouchPoints > 0` plus a coarse-pointer media query, neither of which a resized
+  desktop Chrome window satisfies. Needs a real touch device or a proper CDP device-emulation
+  session, neither available this session — genuinely unverified, not just unreported.
+- **Daily mode**, and a full campaign playthrough beyond mission 1's opening.
+- **Minor, not chased this session:** on the main menu, a "FIRST STRIKE — ROCKET LAUNCHER"
+  style ammo-unlock toast briefly renders behind/through the CAMPAIGN mode card (z-order),
+  visible for roughly a second during the attract-mode intro. Cosmetic, self-resolves, not
+  investigated further — worth a look if someone's already in `menu.ts`.
+- `npx tsc --noEmit` clean after both fixes. No console errors observed across boot, attract
+  demo, PLAY, firing, forced result cards, or campaign mission 1 entry.

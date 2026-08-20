@@ -1182,7 +1182,13 @@ export class Menu {
     const gs = 38 * k;
     const gap = 10 * k;
     const totalW = ids.length * gs + (ids.length - 1) * gap;
-    const bw = Math.min(w - 48 * k, totalW + 60 * k);
+    const maxW = w - 48 * k;
+    const label = ids.map(weaponName).join("   ·   ");
+    // The box has to fit whichever is wider, the icon row or the name row — a run
+    // that clears several unlock rungs at once (a big medal/streak payout can do
+    // this in a single card) sets names, not icons, as the wide one.
+    const labelSize = 12 * k;
+    const bw = Math.min(maxW, Math.max(totalW + 60 * k, measure(ctx, label, labelSize, 900) + 32 * k));
     const bh = gs + 48 * k;
     const bx = w / 2 - bw / 2;
 
@@ -1200,8 +1206,10 @@ export class Menu {
     ids.forEach((id, i) => {
       ctx.drawImage(iconBitmap(id), x0 + i * (gs + gap), y + 26 * k, gs, gs);
     });
-    text(ctx, ids.map(weaponName).join("   ·   "), w / 2, y + bh - 12 * k,
-      12 * k, CREAM, "center", "middle", 900);
+    // Even the widened box has a ceiling (`maxW`) — a huge unlock haul on a narrow
+    // viewport still has to fit, so the label shrinks rather than spilling past it.
+    const fit = Math.min(1, (bw - 32 * k) / Math.max(1, measure(ctx, label, labelSize, 900)));
+    text(ctx, label, w / 2, y + bh - 12 * k, labelSize * clamp(fit, 0.6, 1), CREAM, "center", "middle", 900);
     return y + bh + 14 * k;
   }
 

@@ -135,6 +135,14 @@ export class Game implements GameCtx {
   private godMode = false;
   private hintAlpha = 1;
   private running = false;
+  /**
+   * Snapshot of `input.mousePressed` taken before this frame's fixed step can consume
+   * it. The coach reads this instead of `input.mouseDown` because a fast click or tap
+   * can complete (pointerdown then pointerup) before a single rAF callback runs, so by
+   * the time `coachInput()` is built `mouseDown` has already gone back to false even
+   * though the shot fired — `mousePressed` is the edge that survives that race.
+   */
+  private firedEdgeThisFrame = false;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -488,6 +496,8 @@ export class Game implements GameCtx {
     const rawDt = Math.min(0.25, (now - this.lastFrame) / 1000) || 0;
     this.lastFrame = now;
     this.fps = lerp(this.fps, rawDt > 0 ? 1 / rawDt : 60, 0.1);
+    // Sampled before anything below can consumeEdges() it away — see the field doc.
+    this.firedEdgeThisFrame = this.input.mousePressed;
 
     this.resize();
     // Thumbs are read before anything consumes input, so a touch and the step that
@@ -1257,7 +1267,7 @@ export class Game implements GameCtx {
   private coachInput(): CoachInput {
     return {
       live: !this.paused && !this.outcome && !this.player.isDown,
-      firing: this.input.mouseDown,
+      firing: this.input.mouseDown || this.firedEdgeThisFrame,
       moveX: this.input.moveX,
       ammoIndex: this.player.weapon.index,
       ammoCount: this.player.weapon.list.length,
