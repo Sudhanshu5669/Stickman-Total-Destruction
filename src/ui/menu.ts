@@ -76,6 +76,10 @@ export interface ResultCard {
   record?: string;
   /** Name of the mission the NEXT button leads to, so the button can say where it goes. */
   nextLabel?: string;
+  /** Medals this run earned, if any. Their bonus is already folded into `earned`. */
+  medals?: { name: string; detail: string; fresh: boolean }[];
+  /** The daily streak, if this run was the first of a new day. */
+  streak?: { days: number; bonus: number } | null;
 }
 
 /**
@@ -1108,6 +1112,10 @@ export class Menu {
     const top = h * 0.11;
     text(ctx, r.title, w / 2, top, (narrow ? 32 : 42) * k, r.won ? "#6ddc7a" : "#e8433a",
       "center", "middle", 900, "rgba(0,0,0,0.75)");
+    if (r.subtitle) {
+      text(ctx, r.subtitle, w / 2, top + (narrow ? 22 : 26) * k, 13 * k,
+        "rgba(244,241,232,0.62)", "center", "middle", 700);
+    }
 
     // What they earned leads, not whether they won. A loss that paid out 9,000 carnage
     // is a good run, and the number is the reason to press the button below.
@@ -1129,6 +1137,19 @@ export class Menu {
       text(ctx, `WORLD RANK  #${r.rank.toLocaleString("en-US")}`, w / 2, y, 15 * k, GOLD,
         "center", "middle", 900, "rgba(0,0,0,0.6)");
       y += 26 * k;
+    }
+
+    if (r.medals?.length) {
+      const names = r.medals.map((m) => m.name).join("   ·   ");
+      text(ctx, names, w / 2, y, 14 * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.6)");
+      y += 20 * k;
+      text(ctx, r.medals[0].detail, w / 2, y, 11 * k, "rgba(244,241,232,0.55)", "center", "middle", 700);
+      y += 24 * k;
+    }
+    if (r.streak && r.streak.days > 1) {
+      text(ctx, `${r.streak.days}-DAY STREAK  ·  +${r.streak.bonus.toLocaleString("en-US")}`,
+        w / 2, y, 12 * k, "rgba(244,241,232,0.7)", "center", "middle", 800);
+      y += 22 * k;
     }
 
     if (r.unlocked.length) y = this.drawUnlocks(ctx, w, y, k, r.unlocked);

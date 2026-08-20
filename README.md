@@ -1,4 +1,4 @@
-# Stickman Ascension
+# Stickman Total Destruction
 
 A 2D ragdoll destruction sandbox. You are a stickman with a gun that fires things a gun
 should not be able to fire — chickens, sedans, grand pianos, passenger jets, live
@@ -83,6 +83,12 @@ comfortably left behind is unloaded, so a 5 km run costs the same as a 50 m one.
 In the menu: `←` `→` choose, `Enter` open/play, `Esc` back, or click a card and then the
 big button.
 
+There is no controls screen. `src/ui/coach.ts` teaches one control at a time, in-game,
+beside the stickman, led by a picture rather than prose, and dismissed by doing the
+thing — a player who never touches the jetpack never gets a jetpack lesson. It can be
+switched off entirely from the pause menu (`CONTROL TIPS`), and screenshake has its own
+four-step control there too (`OFF`/`LOW`/`MEDIUM`/`FULL`) for players sensitive to it.
+
 **Recoil is a movement tool.** The heavy rounds kick hard enough to launch you across the
 map. Firing an elephant while standing still will put you on your back.
 
@@ -95,15 +101,35 @@ uncontrollable on the other. It cuts out while you are knocked down.
 
 ## The arsenal
 
-16 rounds, all defined as data in `src/weapons/ammo.ts`:
+18 rounds, all defined as data in `src/weapons/ammo.ts`:
 
 Chicken Cannon · Rocket Launcher · Sedan Slinger · Jetliner Blaster · Elephant Gun ·
 Human Resources (fires screaming ragdolls) · Anvil Express · Grand Finale (a piano, which
 plays a chord when it lands) · Cold Storage (flash-freezes whatever it touches) ·
 Perfect Game (bowling ball) · Melon Repeater · Buzzsaw Barrage · Static Discharge ·
-Barrel Roll · Tactical Regret (a nuke) · Singularity (a black hole, 3 rounds)
+Barrel Roll · Tactical Regret (a nuke) · Singularity (a black hole, 3 rounds) ·
+Hydro Cannon (a hose — puts out the fires below and douses anything flammable) ·
+Flamethrower (sets fires; wet targets won't catch)
 
-Adding a new one is a single object literal — no new classes:
+Round 1 of each is free the moment you fire it, so trying the arsenal pays for itself —
+see *Progression* below.
+
+## Progression
+
+Five rounds ship unlocked (chicken, watermelon, anvil, barrel, rocket — the four verbs a
+new player needs plus one round of pure spectacle). Everything else unlocks against
+lifetime **carnage**, earned by destroying things and banked at the end of every run
+(`src/ui/progress.ts`). The ladder is tuned against a measured earn rate so the first
+unlock (`bowling`, 2,000) lands at under a minute of play and no later gap ever exceeds
+about twelve minutes — there is always a partially-filled bar toward the next round.
+
+On top of that, every finished run is scored for **medals** (one-off and repeatable
+destruction milestones), a **daily streak** with a grace day so missing one day doesn't
+reset it, and a lifetime **best run** bonus — all folded into the carnage the result
+card shows you earned. Ranks (VANDAL through HEAT DEATH) are cosmetic titles on top of
+lifetime carnage, spaced to stay roughly a session apart forever.
+
+Adding a new round is a single object literal — no new classes:
 
 ```ts
 {
@@ -129,10 +155,11 @@ src/
   entities/    ragdoll, player, enemy, block/terrain/debris, projectile
   weapons/     ammo registry, the gun
   render/      draw helpers, stickman + creature renderers, prop art, backdrop, themes
-  fx/          particle pool, procedural WebAudio
+  fx/          juice (unified impact curve), particles, decals, gore, fire/fluid/solids,
+               procedural WebAudio + generative music
   levels/      structure builder, worlds, campaign, endless chunks, weather hazards
   ai/          attract-mode driver
-  ui/          HUD, menus, progress store
+  ui/          HUD, menus, progress store, in-game coach, player settings
 ```
 
 A level is a `LevelDef` (`src/levels/types.ts`): a palette (`Theme`), a gravity value, a
@@ -216,9 +243,24 @@ covering 1.3 m per frame is otherwise invisible. Incoming fire is charged at fac
 rather than through the player's self-damage discount (which exists so your own rocket
 blast doesn't kill you at the range this game is played at) — see `Game.target()`.
 
+**Game feel** (`fx/juice.ts`) is one curve, `Magnitude` (0..1), that every violent event
+is expressed on — hitstop, camera trauma/punch/kick, screen flash, slow-motion and
+particle burst all come off the same table instead of each call site inventing its own
+numbers. `fromEnergy`/`fromOverkill`/`fromExplosion`/`fromCollapse`/`fromFall` turn
+whatever a call site actually knows (collision kilojoules, damage-to-maxHp ratio, blast
+radius, fall speed) into a magnitude; `hit()`/`kill()`/`collapse()`/`explosion()` apply
+it. The audio director scores the same value, so sound and picture never drift apart.
+Screenshake itself is Perlin noise, not per-frame random, and trauma is squared before
+it becomes pixel amplitude — a documented motion-sickness trigger, so it is also a
+four-step player setting (`ui/settings.ts`) rather than a constant.
+
 **Audio** is synthesised at runtime — no audio files at all. Clucks, elephant
 trumpets, explosions and the piano chord are all oscillators and filtered noise
-(`fx/audio.ts`).
+(`fx/audio.ts`), mixed through a priority-weighted, distance-attenuated 24-voice pool
+with a master limiter (`fx/audio-mix.ts`) so a collapsing tower firing hundreds of
+impact events in one frame degrades gracefully instead of clipping. A generative
+soundtrack (`fx/audio-music.ts`) layers in with combat and eases back at the menu and
+the results screen, all driven by the same excitement value destruction feeds.
 
 **Performance.** Two things dominate and both are handled: characters far from the camera
 leave the simulation entirely (`Ragdoll.setEnabled`), and off-screen actors are culled
@@ -238,15 +280,31 @@ poking.
 
 ## Known gaps / next steps
 
-- ~~**Bundle size**~~ — **closed, not a problem.** Measured at 2.34 MB raw / **848 KB
+- ~~**Bundle size**~~ — **closed, not a problem.** Measured at 2.3 MB raw / **~896 KB
   gzipped**, against CrazyGames' 20 MB mobile-homepage eligibility gate. We are at roughly
-  4% of the limit, and cold boot measures 677 ms against a 10 s budget. Do **not** migrate to
-  `@dimforge/rapier2d` (separate `.wasm`) to save size we do not need — the compat package
-  exists precisely to avoid bundler `.wasm` misconfiguration, and switching trades a
-  non-existent problem for a real load-time risk.
+  4.5% of the limit, and cold boot measures well under a second against a 10 s budget. Do
+  **not** migrate to `@dimforge/rapier2d` (separate `.wasm`) to save size we do not need —
+  the compat package exists precisely to avoid bundler `.wasm` misconfiguration, and
+  switching trades a non-existent problem for a real load-time risk.
 - ~~**No mobile/touch controls / no CrazyGames SDK**~~ — **closed.** Both shipped:
   `src/ui/touch.ts` and `src/platform/portal.ts` (ads, leaderboards, loading and gameplay
   brackets, rewarded revive).
+- ~~**First-90-seconds / onboarding problem**~~ — **closed.** See `OVERHAUL.md` for the
+  full retention pass: populated cold opens in every world, a single-click PLAY, a
+  teach-by-doing coach instead of a controls screen, a unified impact curve
+  (`fx/juice.ts`) driving camera/hitstop/particles/audio off one number, a retuned
+  economy with medals and streaks, and a generative soundtrack that reacts to combat.
+- `fx/juice.ts`'s curve now drives every physics-contact impact and every kill
+  (`Game.dispatchImpacts` / `Game.reportDestruction`), but explosions and structure
+  collapses still use their own hand-authored camera/particle code in
+  `entities/projectile.ts` rather than `juice.explosion()` / `juice.collapse()`. Not a
+  bug — those are tuned and working — but it means `Camera.frameSpectacle` ("look at
+  that") is still unused. Worth revisiting if a big collapse ever needs to hold the
+  frame.
+- No leaderboard board exists yet for longest chain / biggest hit (only `daily` and
+  `distance` are submitted). `progress.recordChain` now tracks the lifetime best
+  locally; submitting it needs a board actually configured on the CrazyGames dashboard
+  first.
 - Endless has one palette (day) and one ground height. Chunks that change elevation or
   theme mid-run would help it read as a journey rather than a corridor.
 - Campaign objectives are all "clear the map". Escort, timed and defend variants would fit

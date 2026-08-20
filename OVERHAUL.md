@@ -3,9 +3,10 @@
 _Living working document. Owned by the Creative Director (lead agent). Every worker reads
 this before starting; the Director updates it after every wave._
 
-**Status:** Wave 1 in progress. Research (W1) complete. W2-W7 were interrupted mid-edit by an
-account spend limit and have been resumed; see section 10.
-**Last updated:** 2026-08-20
+**Status:** Wave 1 complete and audited. Wave 2 (Director integration) mostly complete —
+every worker's dead/unwired hook is now live in `src/game.ts`. Remaining: a full manual
+playtest pass (T10), the tech-debt items in T11, and T13. See section 11.
+**Last updated:** 2026-08-20 (Wave 2 session)
 
 ---
 
@@ -106,12 +107,12 @@ each other's work.
 | ID | Worker | Task | Status |
 |---|---|---|---|
 | T1 | W1 | Research: CrazyGames platform rules and ranking; portal retention benchmarks; FTUE patterns; competitive teardown; game-feel literature with concrete numbers; tech options; non-scummy meta-retention | **DONE** — findings in section 9; corrections relayed to W2-W7 |
-| T2 | W2 | Cold open: re-author spawns so a populated, destructible set piece is in frame at t=0 in all four worlds; no dead walks longer than a few seconds; author chain-reaction/domino set-ups; front-load endless chunks; fix the attract demo so it is destroying something within 1s | in flight |
-| T3 | W3 | Framing and juice: tighter, biased camera so ragdolls read; bidirectional autoZoom; a "frame the spectacle" API; `fx/juice.ts` mapping magnitude to hitstop/slowmo/trauma/punch/flash/burst; heavier particles, gore and decals; screenshake discipline | in flight |
-| T4 | W4 | Art direction: rebuild all four palettes with a deliberate value/saturation structure so black stickman silhouettes pop; parallax background with depth cueing; kill the dead flat ground; fix the bottom-of-viewport sky seam; polish props and ammo icons; recommend the hero/thumbnail frame | in flight |
-| T5 | W5 | UX: collapse path-to-play to a single PLAY; replace the controls manual with a teach-by-doing coach (`src/ui/coach.ts`); rebrand to STICKMAN TOTAL DESTRUCTION including the boot screen; reframe the locked arsenal as anticipation rather than deprivation; HUD hierarchy and mobile scaling; redesign the results card around "one more go" | in flight |
-| T6 | W6 | Economy: retune the unlock ladder so the first unlock lands in 60-90s and rewards land every 20-30s; rebalance per-payload `points`; recommend a new combo curve; add reward texture (medals, milestones, first-kill bonuses, daily/streak); arsenal redundancy audit; save migration | in flight |
-| T7 | W7 | Audio: layered, energy-scaled impact sounds per material; master limiter; **voice limiting and pooling** (a collapsing tower fires hundreds of events per frame); distance attenuation, panning and ducking; procedural generative soundtrack that reacts to combo (`src/fx/audio-music.ts`); suspend on hidden tab | in flight |
+| T2 | W2 | Cold open: re-author spawns so a populated, destructible set piece is in frame at t=0 in all four worlds; no dead walks longer than a few seconds; author chain-reaction/domino set-ups; front-load endless chunks; fix the attract demo so it is destroying something within 1s | **DONE** — audited (section 11); confirmed live in a browser smoke test |
+| T3 | W3 | Framing and juice: tighter, biased camera so ragdolls read; bidirectional autoZoom; a "frame the spectacle" API; `fx/juice.ts` mapping magnitude to hitstop/slowmo/trauma/punch/flash/burst; heavier particles, gore and decals; screenshake discipline | **DONE** — code was complete but `juice.ts` was dead (never imported outside a comment) and `settings.shake` was never read by the camera. Both wired by the Director in Wave 2; see section 11. |
+| T4 | W4 | Art direction: rebuild all four palettes with a deliberate value/saturation structure so black stickman silhouettes pop; parallax background with depth cueing; kill the dead flat ground; fix the bottom-of-viewport sky seam; polish props and ammo icons; recommend the hero/thumbnail frame | **DONE** — audited (section 11) |
+| T5 | W5 | UX: collapse path-to-play to a single PLAY; replace the controls manual with a teach-by-doing coach (`src/ui/coach.ts`); rebrand to STICKMAN TOTAL DESTRUCTION including the boot screen; reframe the locked arsenal as anticipation rather than deprivation; HUD hierarchy and mobile scaling; redesign the results card around "one more go" | **DONE** — the controls wall was removed but `Coach` was never instantiated, so nothing taught controls at all. Wired by the Director in Wave 2 and confirmed live (the FIRE prompt appears and dismisses correctly). |
+| T6 | W6 | Economy: retune the unlock ladder so the first unlock lands in 60-90s and rewards land every 20-30s; rebalance per-payload `points`; recommend a new combo curve; add reward texture (medals, milestones, first-kill bonuses, daily/streak); arsenal redundancy audit; save migration | **DONE** — audited (section 11). `progress.scoreRun()` (medals/streak/best-run bonus) was built but never called from `finish()`; wired by the Director in Wave 2, plus a small medals/streak render added to the result card. |
+| T7 | W7 | Audio: layered, energy-scaled impact sounds per material; master limiter; **voice limiting and pooling** (a collapsing tower fires hundreds of events per frame); distance attenuation, panning and ducking; procedural generative soundtrack that reacts to combo (`src/fx/audio-music.ts`); suspend on hidden tab | **DONE** — the mixer/pool/limiter/tab-suspend are self-contained and worked already. `sfx.update`, `sfx.setAdPlaying`, `sfx.listener` and `sfx.setMood` were never called from `game.ts`, so the music never reacted, positional audio was pinned to world origin, and ads didn't mute the game. All four wired by the Director in Wave 2; see section 11. |
 
 ### Director's own completed work (does not block on workers)
 
@@ -127,12 +128,12 @@ each other's work.
 
 | ID | Task | Status |
 |---|---|---|
-| T8 | Integrate every worker's requested `game.ts` hook (juice API, coach API, music intensity, combo curve, scoring) | blocked on wave 1 |
-| T9 | Full typecheck, production build, bundle-size check | blocked |
-| T10 | Director playtest pass: cold-start timing (target — **something destroyed within 5 seconds**), 10-minute session, mobile viewport, campaign, endless, daily | blocked |
-| T11 | Act on W1's tech recommendations (bundle size, renderer, perf); scope decided once the report lands | blocked |
-| T12 | Update `README.md` and the `AGENTS.md` project memory to match the new design | blocked |
-| T13 | CEO demo build and before/after presentation | blocked |
+| T8 | Integrate every worker's requested `game.ts` hook (juice API, coach API, music intensity, combo curve, scoring) | **DONE** — see section 11 for the full list of what was wired |
+| T9 | Full typecheck, production build, bundle-size check | **DONE** — `tsc --noEmit` clean; build is 2.3 MB raw / ~896 KB gzipped (~4.5% of the 20 MB gate) |
+| T10 | Director playtest pass: cold-start timing (target — **something destroyed within 5 seconds**), 10-minute session, mobile viewport, campaign, endless, daily | **PARTIAL** — automated Playwright smoke tests confirm the boot screen, attract-mode demo, PLAY flow, coach prompt, juice/particles, combo curve and a full result card (subtitle, medals, best-run record, unlock banner) all work with zero console errors (section 11). Still needed: a real human playtest of a full 10-minute session, the mobile/touch viewport, campaign/endless/daily specifically, and the streak banner (needs a multi-day save to trigger). |
+| T11 | Act on W1's tech recommendations (bundle size, renderer, perf); scope decided once the report lands | **Still deferred, unchanged.** Bundle size is closed (non-issue). The batched-particle-renderer prototype (section 9.4) is a post-retention-fix decision — not attempted this session; current bundle/perf headroom does not demand it yet. |
+| T12 | Update `README.md` and the `AGENTS.md` project memory to match the new design | **PARTIAL.** `README.md` rewritten to match: retitled, 18-round arsenal corrected, new Progression section (unlock ladder, medals, streak, ranks), the coach and shake setting documented, `fx/juice.ts` and the audio director documented, Known Gaps section updated. `AGENTS.md`'s memory block is auto-generated by a separate `omni-memory` tool ("edit outside this block only") and that tool is not available in this session — it still says the combo cap is 6× (now 8×, on a square-root curve). Needs a human or an `omni-memory remember` pass, not a hand edit. |
+| T13 | CEO demo build and before/after presentation | Not started. |
 
 ---
 
@@ -221,6 +222,28 @@ _Append here as decisions are made, so they are never re-litigated._
 - **2026-08-19** — **Screenshake must be user-controllable** (slider or toggle). Documented
   motion-sickness trigger and a standard accessibility expectation; especially necessary
   because W3 is significantly increasing shake.
+- **2026-08-20** — **Wave 2 ran as a single Director session, not a second parallel wave.**
+  A green typecheck after wave 1 was not proof the work was integrated — three of six
+  worker deliverables were complete on disk but never wired into `game.ts`. Verified this
+  by dispatching one read-only audit subagent against the actual task briefs before
+  writing any code, and let it finish before doing any integration work that depended on
+  its findings. See section 11.
+- **2026-08-20** — **Medal/streak/best-run bonus is folded into the single "CARNAGE
+  EARNED" number rather than given its own compartment on the result card.** The number
+  was already the headline; a separate "+bonus" line would make it a subtraction problem
+  for the player to do in their head. A small text banner was added for the medal
+  name(s) and the streak, since those are worth naming even though their carnage is
+  already counted above.
+- **2026-08-20** — **Explosions and structure collapses were left on their own
+  hand-authored camera/particle numbers instead of being switched to
+  `juice.explosion()`/`juice.collapse()`.** Both already work and are tuned;
+  `entities/projectile.ts` is a frozen file, and a purely cosmetic unification wasn't
+  worth the risk of touching it outside a dedicated pass. `Camera.frameSpectacle` stays
+  unused until that pass happens.
+- **2026-08-20** — **No new leaderboard board for longest-chain/biggest-hit**, even
+  though `progress.recordChain()` now actually runs. Submitting to a board that isn't
+  configured on the CrazyGames dashboard is either a silent no-op or an error we can't
+  see from the repo — that configuration has to happen on the platform side first.
 
 ---
 
@@ -371,3 +394,122 @@ been shared, this would have been a merge disaster instead of a five-minute fix.
 than the workers, they cannot be resumed — re-dispatch by role from section 4 instead, and
 give each new worker the diagnosis (section 2), constraints (section 3), its file list
 (section 4), and the never-touch-`game.ts` rule.
+
+---
+
+## 11. Wave 2 session (2026-08-20) — audit and Director integration
+
+**Context.** This session picked up after the incident in section 10, working under a
+different process constraint from wave 1: at most one implementation subagent running at
+a time (instead of six parallel workers), so that a subagent whose output could change an
+implementation decision is always let finish before anything downstream depends on it.
+Everything in this section was either a single read-only audit subagent's findings,
+verified against the actual code, or the Director's own direct edits — there was no
+second wave of parallel workers.
+
+### 11.1 What was found
+
+`git status` was clean and `npx tsc --noEmit` was already green at the start of this
+session — the prior session's wave-1 work (all of T2-T7) had, in fact, landed and been
+committed (`e8181cb "overhauling"`), despite this document's task board still reading "in
+flight". A single audit subagent was dispatched to verify each worker's deliverable
+against its brief, file:line, rather than trusting that a green typecheck meant the work
+was functionally complete.
+
+**Verdict:** T2, T4 and T6 were genuinely done. T3, T5 and T7 were **built correctly but
+never wired into `src/game.ts`**, which only the Director may edit (section 4). Concretely:
+
+- `src/fx/juice.ts` (348 lines, the unified magnitude → hitstop/trauma/punch/kick/flash/
+  slowmo/burst curve) was imported nowhere outside a code comment. `game.ts` was still
+  running its own pre-existing hand-rolled impact numbers.
+- `settings.shake` (the four-step screenshake control, already fully built and wired in
+  the pause menu UI) was never read by `game.ts`, so the slider changed stored state with
+  zero gameplay effect. (`Camera.shakeIntensity`, the exact field built for this, already
+  existed and was already correctly threaded through trauma/punch/kick — it just needed
+  `game.ts` to set it.)
+- `src/ui/coach.ts` (`Coach`, the teach-by-doing onboarding system replacing the old
+  9-line controls card) was never instantiated anywhere. The controls card was removed
+  and nothing replaced it — a real onboarding regression, not just a missed enhancement.
+- `sfx.setAdPlaying()`, `sfx.excite()`/`sfx.update()` (music intensity), `sfx.listener()`
+  (positional audio) and `sfx.setMood()` were never called from `game.ts`. Ads did not
+  mute the game; the generative soundtrack never reacted to combat and, because
+  `update()` was never called to decay it, would only ever climb; positional audio was
+  pinned to world origin `(0,0)` forever instead of tracking the camera.
+- `progress.scoreRun()` (medals, daily streak with a grace day, and a best-run bonus —
+  the "reward texture" from T6's brief) was fully implemented but never called from
+  `finish()`, and `ResultCard`/`drawResult()` had nowhere to show it even if it had been.
+- `ResultCard.subtitle` — real, already-authored copy ("Out of lives. They are still
+  standing.", "Same world for everybody today...") — was built into every result card and
+  never once drawn.
+
+### 11.2 What the Director wired, all in `src/game.ts` unless noted
+
+- **Juice.** `dispatchImpacts()` now calls `juiceHit(this, e.point, fromEnergy(kj), ...)`
+  instead of hand-rolled dust/spark/trauma numbers. `reportDestruction()`'s enemy-kill
+  path now calls `juiceKill(this, at)` instead of a flat `hitstop(0.045)` /
+  `addTrauma(0.16)`. `resetJuice()` is called on every level load so a fresh run isn't
+  penalised by the previous run's slow-motion cooldown.
+- **Shake setting.** `updateCamera()` now sets `this.camera.shakeIntensity = settings.shake`
+  every frame, read at the point trauma is consumed (per that field's own doc comment).
+- **Coach.** `Game.coach = new Coach()`; `.begin()` on every `startLevel()`; `.update()`
+  every frame while playing, fed by a new `coachInput()` that assembles live/firing/moveX/
+  ammo index & count/jetThrottle/limp/touch from existing public state (no changes needed
+  to `entities/player.ts` or `core/input.ts` — everything the coach needs was already
+  public); `.draw()` alongside the crosshair, anchored on `player.chest`.
+- **Audio director.** A new `updateAudio(rawDt)`, called every rendered frame regardless
+  of mode: `sfx.update(rawDt)` (decay), `sfx.setAdPlaying(portal.adPlaying)`,
+  `sfx.listener(camera.pos.x, camera.pos.y, camera.visibleHalf().x)`, and
+  `sfx.setMood(...)` mapped from menu/outcome/playing state to the `"menu"/"combat"/
+  "result"` moods `audio-music.ts` already implements.
+- **Medals/streak/best-run.** `finish()` now builds a `RunStats` and calls
+  `progress.scoreRun()` once, after `bankRun()`, per that function's own contract. The
+  bonus is folded straight into `this.earned` so the result card's one big carnage number
+  stays honest without needing a second line to explain it. `bestDelta > 0` sets
+  `record: "NEW BEST RUN"` (reusing the field/draw code that already existed for it).
+  `ResultCard` gained `medals?`/`streak?` fields; `Menu.drawResult()` gained a small text
+  banner for them (medal names + the first medal's detail line, then the streak, in the
+  same visual language as the existing record/rank line) — a **new, small UI addition**,
+  the one piece of this wave that wasn't purely wiring an existing hook.
+- **Subtitle.** `Menu.drawResult()` now actually draws `r.subtitle` under the title.
+- **Deliberately not done:** `entities/projectile.ts`'s explosion camera/particle code was
+  left as its own hand-authored numbers rather than switched to `juice.explosion()` —
+  it works, and rewriting a frozen entities file for a cosmetic-only unification wasn't
+  worth the risk this session. This means `Camera.frameSpectacle` ("look at that") is
+  still never called. No new leaderboard board was added for longest-chain/biggest-hit —
+  `progress.recordChain()` now actually runs (via `scoreRun`), but submitting it needs a
+  board configured on the CrazyGames dashboard first, which is outside this repo.
+
+### 11.3 Verification
+
+`npx tsc --noEmit` clean. Production build: 2.3 MB raw / ~896 KB gzipped. A Playwright
+smoke test (dev server + headless Chromium, `playwright@1.62.1` installed ad hoc via
+`npm install --no-save`, not added to `package.json`) drove the actual game: boot →
+attract-mode demo already destroying a populated tower at t=0 → click PLAY → fire the
+Chicken Cannon repeatedly. Confirmed live and working, zero console errors the whole run:
+the single-PLAY menu, the coach's FIRE prompt appearing then correctly dismissing after
+the first shot, heavy particle/gore feedback on impact, the new square-root combo curve
+climbing (screenshots showed x38, x41 chains), and score/HUD updating correctly.
+
+A second smoke test forced a finish (`window.game.finish("lost")`, exposed by `main.ts`,
+called after a real run had accumulated score/blocks/kills/chain) to render an actual
+result card end to end. Confirmed clean: the subtitle now shows ("Out of lives. They are
+still standing."), `NEW BEST RUN` shows in green, the medal banner shows
+(`DEMOLITIONIST · TOTAL COLLAPSE · BODY COUNT`, detail line `35 blocks down`) with no
+overlap against the "3 NEW ROUNDS UNLOCKED" banner below it, and the stat chips and
+next-unlock bar are unaffected. The streak banner correctly did not show (not the first
+run of a new day) — a multi-day streak render is still unverified.
+
+**Not verified this session:** mobile/touch viewport, a full campaign playthrough, daily
+mode, and the streak banner specifically (needs a save with `day` set to yesterday to
+trigger `touchStreak()` returning non-null) — worth a manual check before shipping.
+
+### 11.4 For the next session
+
+1. Do the manual playtest T10 still calls for: a full 10-minute session, mobile viewport,
+   campaign start-to-finish, endless, and the daily mode. In particular, actually finish
+   a run and look at the result card — confirm the medals/streak banner reads well and
+   doesn't collide with the unlock banner or stat chips when several are shown at once.
+2. T11 (batched particle renderer) is still open and still correctly low-priority.
+3. T12: get a human (or the `omni-memory` tool) to refresh `AGENTS.md`'s memory block —
+   the 6× combo cap it states is now stale (8×, square-root curve).
+4. T13: CEO demo build, once the manual playtest above is clean.

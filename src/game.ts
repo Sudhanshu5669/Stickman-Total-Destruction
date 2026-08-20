@@ -16,9 +16,12 @@ import { Enemy, alertNearby } from "./entities/enemy";
 import { Block, Debris } from "./entities/block";
 import { Hud, type HudState } from "./ui/hud";
 import { Menu, type MenuAction } from "./ui/menu";
-import { previousCost, progress } from "./ui/progress";
+import { previousCost, progress, type RunStats } from "./ui/progress";
 import { TouchControls } from "./ui/touch";
+import { Coach, type CoachInput } from "./ui/coach";
+import { settings } from "./ui/settings";
 import { portal } from "./platform/portal";
+import { fromEnergy, hit as juiceHit, kill as juiceKill, resetJuice } from "./fx/juice";
 import type { ResultCard } from "./ui/menu";
 import { DemoDriver } from "./ai/demo";
 import { Builder } from "./levels/builder";
@@ -60,6 +63,7 @@ export class Game implements GameCtx {
   readonly hud = new Hud();
   readonly menu = new Menu();
   readonly background = new Background();
+  readonly coach = new Coach();
 
   physics!: Physics;
   player!: Player;
@@ -119,6 +123,8 @@ export class Game implements GameCtx {
   private unlockedThisRun: string[] = [];
   /** Leaderboard placing, filled in asynchronously after a run ends. */
   private rank: number | null = null;
+  /** Medals, streak and best-run bonus for the run that just ended. Set once by `finish()`. */
+  private lastScoreResult: ReturnType<typeof progress.scoreRun> | null = null;
   /** One revive per run, and only when a portal is actually there to pay for it. */
   private reviveUsed = false;
   private reviving = false;
@@ -218,6 +224,9 @@ export class Game implements GameCtx {
     this.slowmoLeft = 0;
     this.slowmoScale = 1;
     this.accumulator = 0;
+    // A fresh run starts unpenalised — a nuke fired at the end of the last one must
+    // not eat the first spectacular moment of this one.
+    resetJuice();
   }
 
   /** True when the current level permits the god-mode cheat. Campaign never does. */
@@ -284,9 +293,11 @@ export class Game implements GameCtx {
     this.bankedScore = 0;
     this.unlockedThisRun = [];
     this.rank = null;
+    this.lastScoreResult = null;
     this.reviveUsed = false;
     this.reviving = false;
     this.loadLevel(def);
+    this.coach.begin();
     portal.gameplayStart();
     this.player.control = null;
     this.canvas.style.cursor = "none";
@@ -453,8 +464,9 @@ export class Game implements GameCtx {
     this.comboMax = Math.max(this.comboMax, this.combo);
     this.comboTimer = 1;
     if (kind === "enemy") {
-      this.hitstop(0.045);
-      this.camera.addTrauma(0.16);
+      // Unified impact curve — see fx/juice.ts. A kill is never allowed to land
+      // softer than the crate next to it.
+      juiceKill(this, at);
       this.kills++;
       this.level.director?.countKill();
     }
@@ -482,6 +494,7 @@ export class Game implements GameCtx {
     // acts on it land on the same frame — same contract as the keyboard.
     this.touch.update(rawDt);
     this.handleFrameKeys();
+    this.updateAudio(rawDt);
 
     this.menu.lastMouse.x = this.input.mouse.x;
     this.menu.lastMouse.y = this.input.mouse.y;
@@ -548,6 +561,7 @@ export class Game implements GameCtx {
     if (this.mode === "playing" && this.input.engaged) {
       this.hintAlpha = Math.max(0, this.hintAlpha - rawDt * 0.7);
     }
+    if (this.mode === "playing") this.coach.update(rawDt, this.coachInput());
 
     if (this.comboTimer > 0) {
       // 2.38s, up from 1.61s. At the old rate a player firing the artillery could not
@@ -636,6 +650,18 @@ export class Game implements GameCtx {
 
     const before = this.unlockedThisRun.length;
     this.bankRun();
+
+    // Medals, the daily streak and the best-run bonus, all in one call — see
+    // `progress.scoreRun`. Folded straight into `earned` so the one big number on the
+    // result card stays honest rather than needing a second "+bonus" line to explain it.
+    const stats: RunStats = {
+      score: this.score, blocks: this.blocksDestroyed, kills: this.kills,
+      bestChain: this.comboMax, seconds: this.time,
+    };
+    this.lastScoreResult = progress.scoreRun(stats);
+    this.earned += this.lastScoreResult.bonus;
+    this.unlockedThisRun.push(...this.lastScoreResult.unlocked);
+
     if (this.unlockedThisRun.length > before) {
       sfx.levelUp();
       portal.happytime();
@@ -721,6 +747,12 @@ export class Game implements GameCtx {
         : null,
       rank: this.rank,
       canRevive: this.canRevive,
+      // Beating your own best run is the one bonus that gets harder to claim the more
+      // you play, so it is the one worth naming rather than folding silently into the
+      // earnings number above.
+      record: this.lastScoreResult && this.lastScoreResult.bestDelta > 0 ? "NEW BEST RUN" : undefined,
+      medals: this.lastScoreResult?.medals,
+      streak: this.lastScoreResult?.streak ?? null,
     };
     const stats: [string, string][] = [
       ["SCORE", this.score.toLocaleString("en-US")],
@@ -857,15 +889,9 @@ export class Game implements GameCtx {
 
       const kj = e.energy / 1000;
       if (kj < 6) continue;
-
-      if (this.camera.isVisible(e.point, 6)) {
-        const n = clamp(Math.round(kj / 12), 1, 10);
-        this.particles.dust(e.point.x, e.point.y, n, 2.6);
-        if (kj > 30) this.particles.sparks(e.point.x, e.point.y, clamp(Math.round(kj / 18), 2, 12), 8, "#ffe9a8");
-        this.camera.addTrauma(clamp(kj / 900, 0.02, 0.32));
-      }
-      // Big collisions get a frame of freeze — the cheapest, strongest impact cue.
-      if (kj > 120) this.hitstop(clamp(kj / 5000, 0.02, 0.09));
+      // One curve for how hard everything hits, so a rifle round and a tower coming
+      // down are distinguishable instead of every impact inventing its own numbers.
+      juiceHit(this, e.point, fromEnergy(kj), e.normal.x, e.normal.y);
     }
   }
 
@@ -929,6 +955,9 @@ export class Game implements GameCtx {
   }
 
   private updateCamera(dt: number) {
+    // Read at the point trauma is consumed rather than added, so a setting change is
+    // never mid-flight — a slider dragged to OFF kills the shake on the very next frame.
+    this.camera.shakeIntensity = settings.shake;
     const p = this.player.ragdoll.dead ? this.player.ragdoll.center() : this.player.pos;
     const aim = this.player.aim;
     // Lead the camera a third of the way to the crosshair so you can see what you hit.
@@ -937,6 +966,19 @@ export class Game implements GameCtx {
     const speed = this.player.ragdoll.speed();
     this.camera.autoZoom(speed + this.player.launchBoost * 14, dt, BASE_ZOOM);
     this.camera.update(dt);
+  }
+
+  /**
+   * The parts of the audio director that run every rendered frame regardless of mode
+   * — decaying the music's excitement, keeping the listener at the camera so panning
+   * and distance attenuation track it, muting for a portal ad, and picking the mood.
+   */
+  private updateAudio(rawDt: number) {
+    sfx.update(rawDt);
+    sfx.setAdPlaying(portal.adPlaying);
+    const half = this.camera.visibleHalf();
+    sfx.listener(this.camera.pos.x, this.camera.pos.y, half.x);
+    sfx.setMood(this.mode === "menu" ? "menu" : this.outcome ? "result" : "combat");
   }
 
   // ------------------------------------------------------------------ input
@@ -1199,6 +1241,7 @@ export class Game implements GameCtx {
       return;
     }
 
+    this.coach.draw(ctx, w, h, this.camera, this.player.chest);
     this.hud.drawCrosshair(
       ctx,
       this.input.mouse.x,
@@ -1208,6 +1251,20 @@ export class Game implements GameCtx {
       this.player.weapon.cooldownFrac,
     );
     this.touch.draw(ctx, w, h, true);
+  }
+
+  /** What the coach needs to know about this frame. See `ui/coach.ts`. */
+  private coachInput(): CoachInput {
+    return {
+      live: !this.paused && !this.outcome && !this.player.isDown,
+      firing: this.input.mouseDown,
+      moveX: this.input.moveX,
+      ammoIndex: this.player.weapon.index,
+      ammoCount: this.player.weapon.list.length,
+      jetThrottle: this.player.jetThrottle,
+      limp: this.player.isLimp,
+      touch: this.input.touchMode,
+    };
   }
 
   private hudState(): HudState {
