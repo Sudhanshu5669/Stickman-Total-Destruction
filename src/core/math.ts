@@ -30,8 +30,8 @@ export const smoothstep = (t: number) => {
 /**
  * The source every helper below draws from.
  *
- * Swappable so the daily challenge can build its world from a seeded stream — see
- * `core/rng`. Everything that shapes a *level* goes through these helpers; per-frame
+ * Swappable, so a level can be built from a seeded stream if anything ever needs to
+ * reproduce one exactly. Everything that shapes a *level* goes through these helpers; per-frame
  * effects call `Math.random` directly and are deliberately left out of the seeded
  * stream, since their call count depends on frame rate and would desync the seed.
  */

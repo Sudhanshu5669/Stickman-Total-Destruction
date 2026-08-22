@@ -589,10 +589,6 @@ export class Game implements GameCtx {
     portal.happytime();
   }
 
-  equipJetpack() {
-    this.player.hasJetpack = true;
-  }
-
   private fixedUpdate(dt: number) {
     this.time += dt;
     if (this.mode === "playing") this.handleSimKeys();

@@ -70,14 +70,6 @@ export interface GameCtx {
   slowmo(seconds: number, scale?: number): void;
   /** Full-screen colour flash, used by explosions and the nuke. */
   flash(strength: number, color?: string): void;
-  /**
-   * Straps the jetpack on, mid-level.
-   *
-   * Exists so the moment a level *gives* the player the pack is the moment they can
-   * fly, rather than the next time a level loads. Persisting the unlock is a separate
-   * concern and belongs to whoever called this.
-   */
-  equipJetpack(): void;
   /** Registers destruction for the combo meter. */
   reportDestruction(kind: "block" | "enemy" | "structure", at: V): void;
   /** Panics every stickman within `radius` — called after every explosion. */
