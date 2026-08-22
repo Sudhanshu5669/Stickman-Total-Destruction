@@ -6,54 +6,135 @@ import type { LevelDef, LevelInfo } from "./types";
 /**
  * The Proving Ground — the QA harness, and a real arena.
  *
- * This is the level every system is tested in before it is allowed near the six shipping
+ * This is where every system is tested before it is allowed near the six shipping
  * arenas, and it stays in the repo for the life of the project for exactly that reason.
- * It is not scaffolding and it is not throwaway: when the camera changes, this is where
- * you check the camera; when the AI changes, this is where you watch it think.
+ * It is not scaffolding: when the camera changes, this is where you check the camera;
+ * when the AI changes, this is where you watch it think; when a material is retuned,
+ * this is the control group that shows it.
  *
  * It earns its place in the arena list too. A flat, legible, over-supplied range is the
  * best possible first thirty seconds for somebody who has just arrived and wants to find
  * out what a gun that fires elephants does — so the thing built for testing is also the
  * thing built for learning, and it ships.
  *
- * Laid out left to right in bands, each band isolating one thing worth looking at, with
- * a wide clear firing lane in front of all of them.
+ * ## Layout
+ *
+ * Bands, left to right, each isolating one thing worth looking at, with a clear firing
+ * lane in front of all of them and nothing tall enough to block the next band along:
+ *
+ * | x        | band              | exists to test                                    |
+ * |----------|-------------------|---------------------------------------------------|
+ * | -34      | spawn             | —                                                 |
+ * | -30..-8  | material control  | every `MaterialId`, identical geometry            |
+ * | -4..8    | structures        | collapse — tower, house, wall, pyramid            |
+ * | 12..26   | loose physics     | scatter, teeter, explosive chain                  |
+ * | 30..44   | pixel art         | `spriteWall` / `spriteBlock` / `prop` / `skin`    |
+ * | 48..70   | the cast          | every enemy kind and behaviour, with real cover   |
+ * | 74..110  | the long shot     | camera reach and aim-lead at distance             |
+ *
+ * The range markers past x=74 are the reason the last band exists: they are placed at
+ * known distances so "can the camera see what I am aiming at" has a *measurable* answer
+ * rather than an impression. See System 4 in `SYSTEMS.md`.
  */
+
+const PACK = "GandalfHardcore FREE Platformer Assets";
+const FLOOR = `${PACK}/Floor Tiles1.png`;
+const HOUSE = `${PACK}/House Tiles.png`;
+const DECOR = `${PACK}/Decor.png`;
+const OTHER = `${PACK}/Other Tiles1.png`;
+const CAMPFIRE = `${PACK}/Animated Sprites/Campfire sheet.png`;
+
+/** Decoded before `build` runs — `spriteWall` reads the artwork's alpha. See `LevelDef.assets`. */
+export const PROVING_ASSETS: readonly string[] = [
+  FLOOR, HOUSE, DECOR, OTHER, CAMPFIRE,
+  `${PACK}/Tree1.png`, `${PACK}/Birch1.png`, `${PACK}/Tall Grass.png`,
+];
+
+/** Every material in the game, in one row, so a tuning change shows up as a difference. */
+const MATERIALS = [
+  "wood", "brick", "concrete", "glass", "metal", "ice",
+  "gold", "sandstone", "crystal", "biomass", "hull", "explosive",
+] as const;
+
 function build(game: GameCtx, b: Builder): LevelInfo {
   const G0 = 0;
   void game;
 
-  b.ground(-40, G0 - 3, 200, 6);
+  // One continuous slab. The Proving Ground deliberately has no gaps, no water and no
+  // hazard: anything that can kill you while you are trying to look at something else
+  // makes it a worse instrument.
+  b.skin(b.ground(-46, G0 - 3, 170, 6), { sheet: b.sheet(FLOOR), tx: 0, ty: 0 });
 
-  // ------------------------------------------------------- band 1: materials
-  // One column per material, same size, same spacing: the control group. If a weapon
-  // change makes wood behave like concrete, it shows up here and nowhere else.
-  const mats = ["wood", "brick", "concrete", "glass", "metal", "ice", "gold", "sandstone"] as const;
-  mats.forEach((m, i) => {
-    const x = -28 + i * 3.2;
-    for (let row = 0; row < 4; row++) b.block(x, G0 + 0.6 + row * 1.2, 1.6, 1.2, m);
+  // ------------------------------------------------------- band 1: material control
+  // Identical stacks, one per material, same size and spacing. Everything about them is
+  // held constant *except* the material, which is the only way a change in how wood
+  // behaves is visible rather than merely plausible.
+  MATERIALS.forEach((m, i) => {
+    const x = -30 + i * 1.9;
+    for (let row = 0; row < 3; row++) b.block(x, G0 + 0.5 + row * 1.0, 1.4, 1.0, m);
   });
 
-  // ------------------------------------------------------- band 2: a thing to topple
-  b.tower({ x: 6, baseY: G0, floors: 7, width: 5, material: "concrete", slab: "concrete" });
+  // ------------------------------------------------------- band 2: structures
+  // The four collapse shapes, close enough together that one big round reaches all of
+  // them and far enough apart that each fails on its own.
+  b.tower({ x: -3, baseY: G0, floors: 6, width: 4.5, material: "concrete", windows: true });
+  b.house({ x: 4, baseY: G0, w: 5, h: 3, material: "brick" });
+  b.wall(10, G0, 4, 5, "brick");
+  b.pyramid(16, G0, 5, 0.9, "wood");
 
   // ------------------------------------------------------- band 3: loose physics
-  b.scatter(20, G0, 10, 5);
-  b.explosiveStack(28, G0, 5);
+  b.scatter(22, G0, 8, 3.5);
+  b.teeter(27, G0, 6);
+  b.explosiveStack(31, G0, 5);
 
-  // ------------------------------------------------------- band 4: the cast
-  // Unarmed, armed and elevated, so panic, combat and falling can all be watched at once.
-  b.crowd(38, G0, ["grunt", "grunt", "guard"], 1.9, null);
-  b.gunner("guard", 48, G0, -1, { behavior: "patrol" });
-  b.gunner("grunt", 54, G0, -1, { behavior: "hunter" });
+  // ------------------------------------------------------- band 4: pixel art
+  // The sprite path, exercised end to end: a structure built from its own artwork, loose
+  // skinned crates, an animated prop and flat scenery. If the tileset pipeline breaks,
+  // it breaks here before it breaks in an arena somebody is trying to enjoy.
+  const house = b.sheet(HOUSE);
+  const decor = b.sheet(DECOR);
+  const other = b.sheet(OTHER);
 
-  b.wall(62, G0, 4, 6, "brick");
-  b.gunner("grunt", 64, G0 + 6, -1, { behavior: "sentry" });
-  b.enemy("boss", 72, G0, -1, null);
+  b.spriteWall({ sheet: house, tx: 1, ty: 0, cols: 5, rows: 7, x: 36, baseY: G0, material: "brick" });
+  b.spriteBlock({ sheet: decor, tx: 0, ty: 0, x: 42.5, baseY: G0, material: "wood" });
+  b.spriteBlock({ sheet: decor, tx: 2, ty: 0, x: 43.7, baseY: G0, material: "wood" });
+  b.spriteBlock({ sheet: decor, tx: 0, ty: 0, x: 42.5, baseY: G0 + 1, material: "wood" });
+  b.prop({ sheet: b.sheet(CAMPFIRE), tx: 0, ty: 0, tw: 1, th: 1, x: 45.5, y: G0, scale: 1.6, z: 12, frames: 40, fps: 14 });
+  b.prop({ sheet: b.sheet(`${PACK}/Tree1.png`), tx: 0, ty: 0, tw: 8, th: 6.5, x: 33, y: G0, z: 2, sway: 0.012 });
+  b.prop({ sheet: b.sheet(`${PACK}/Tall Grass.png`), tx: 0, ty: 0, tw: 3, th: 1, x: 40, y: G0, z: 12 });
+  // Planks, so a sprite-skinned *anchored* block is on the bench too.
+  for (let i = 0; i < 4; i++) {
+    b.spriteBlock({ sheet: other, tx: i % 4, ty: 6, x: 47.5 + i, baseY: G0 + 2.4, material: "wood", anchored: true });
+  }
+
+  // ------------------------------------------------------- band 5: the cast
+  // Every kind and every behaviour, each with something to stand behind. The cover is
+  // the point: an AI that takes cover cannot be evaluated on an empty field, and the
+  // previous build's flat maps are exactly why "the enemies just stand there" was true.
+  b.crowd(53, G0, ["grunt", "grunt"], 1.9, null);       // unarmed — panic and topple
+  b.enemy("boss", 56.5, G0, -1, null);                   // unarmed heavyweight
+
+  b.wall(60, G0, 2.4, 2.2, "concrete");                  // chest-high cover
+  b.gunner("grunt", 62, G0, -1, { behavior: "patrol" });
+  b.gunner("guard", 65, G0, -1, { behavior: "hunter" });
+
+  b.wall(69, G0, 3, 6, "brick");                         // a wall to break line of sight
+  b.gunner("grunt", 69, G0 + 6, -1, { behavior: "sentry" });
+  b.gunner("guard", 72, G0, -1, { gun: "shotgun", behavior: "hunter" });
+
+  // ------------------------------------------------------- band 6: the long shot
+  // Range markers at known distances from the last cover, for measuring camera reach.
+  // A sniper at the far end so the *enemy's* sightline is testable too, not just ours.
+  [80, 90, 100, 110].forEach((x, i) => {
+    b.block(x, G0 + 1.5, 0.5, 3, "metal");
+    b.block(x, G0 + 3.4, 1.6, 0.8, "glass");
+    if (i % 2 === 0) b.spriteBlock({ sheet: decor, tx: 2, ty: 0, x: x + 1.4, baseY: G0, material: "explosive" });
+  });
+  b.gunner("guard", 112, G0, -1, { gun: "sniper", behavior: "sentry" });
 
   return {
     spawn: v(-34, G0 + 1.2),
-    bounds: { min: -46, max: 92 },
+    bounds: { min: -44, max: 120 },
     enemies: b.enemies,
     groundY: G0,
   };
@@ -67,5 +148,7 @@ export const PROVING: LevelDef = {
   gravity: -26,
   tags: ["OPEN", "EVERY TOY"],
   accent: "#ffd23f",
+  assets: PROVING_ASSETS,
+  thumbArt: { path: HOUSE, tx: 1, ty: 0, tw: 5, th: 7 },
   build,
 };

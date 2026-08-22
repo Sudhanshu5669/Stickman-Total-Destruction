@@ -8,7 +8,7 @@ Status: `pending` · `building` · `testing` · `done`
 | # | System | Status | Test notes |
 |---|--------|--------|------------|
 | 1 | **Purge** — delete all levels, story, campaign, contracts, endless, daily; silence all audio | **done** | PASS 2026-08-22 — `tsc` clean, `vite build` clean, boots to menu, Proving Ground loads (7 enemies, 194 bodies, 60fps), chicken cannon fires, pause + options work, **zero console errors** |
-| 2 | **Dev arena** — persistent QA harness level with every material, prop and enemy type | pending | Reachable, loads, all fixtures present and destructible |
+| 2 | **Dev arena** — persistent QA harness level with every material, prop and enemy type | **done** | PASS 2026-08-22 — six bands verified in browser: all 12 materials, tower/house/wall/pyramid, scatter/teeter/explosives, `spriteWall` cottage renders its gable from artwork alpha, all 3 enemy kinds + 3 behaviours with cover, range markers at 80/90/100/110. 305 bodies, 60fps, zero console errors. **Baseline visible width ≈ 26 m** — the number System 4 has to beat |
 | 3 | **Quality settings** — Low/Med/High effect budget, auto-detected floor, wired through every fx sim | pending | Low measurably cuts particle counts; no visual crash at any tier |
 | 4 | **Camera** — wider frame, hard aim-lead, spectacle retune | pending | Can see the target being aimed at across the dev arena; no nausea, no lag |
 | 5 | **Enemy AI** — cover, awareness, collapse reaction, loose coordination, retreat | pending | Enemies use cover, scatter when their floor dies, do not stand still to be hit |
