@@ -2,6 +2,7 @@ import type { Actor, GameCtx } from "../core/types";
 import { v, type V } from "../core/math";
 import type { Ctx } from "../render/draw";
 import { blitTiles, PPM, type Sheet } from "../render/sprites";
+import { quality } from "../ui/quality";
 
 export interface SpritePropOptions {
   sheet: Sheet;
@@ -88,7 +89,7 @@ export class SpriteProp implements Actor {
     const w = o.tw * o.scale;
     const x = o.x - w / 2;
 
-    if (o.sway > 0.0001) {
+    if (o.sway > 0.0001 && quality.ambientMotion) {
       // Pivot at the base so the crown moves and the trunk does not — the one detail
       // that separates "tree in wind" from "sticker wobbling".
       const a = Math.sin(this.t * 0.9 + o.x * 0.21) * o.sway;

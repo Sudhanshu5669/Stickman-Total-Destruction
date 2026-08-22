@@ -6,6 +6,7 @@ import { anchorAt, canMark, type Decals } from "./decals";
 import type { SolidField } from "./solids";
 import type { WaterSim } from "./fluid";
 import { sfx } from "./audio";
+import { quality } from "../ui/quality";
 
 /**
  * Combustion, as a simulation rather than an animation.
@@ -119,8 +120,14 @@ export class FireSim {
     }
   }
 
+  /** Active ceiling for the current quality tier, never above the allocated pool. */
+  private get cap() {
+    return Math.min(MAX_FLAMES, quality.maxFlames);
+  }
+
   private add(x: number, y: number, vx: number, vy: number, life: number, heat: number, size: number) {
-    const i = this.count < MAX_FLAMES ? this.count++ : (Math.random() * MAX_FLAMES) | 0;
+    const cap = this.cap;
+    const i = this.count < cap ? this.count++ : (Math.random() * cap) | 0;
     this.x[i] = x; this.y[i] = y;
     this.vx[i] = vx; this.vy[i] = vy;
     this.life[i] = this.maxLife[i] = life;

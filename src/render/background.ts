@@ -3,6 +3,7 @@ import { clamp, hash01, TAU } from "../core/math";
 import { shade, type Ctx } from "./draw";
 import type { SpriteBackdrop, Theme } from "./theme";
 import { sheet } from "./sprites";
+import { quality } from "../ui/quality";
 
 /**
  * Parallax backdrop drawn in screen space before the camera transform, so each layer
@@ -157,7 +158,14 @@ export class Background {
 
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    for (const L of sb.layers) {
+    // The painted backdrops ship four to five ranks of depth. Each is a full-width
+    // `drawImage` per screen, so the far ones — the ones that move least and read as
+    // haze anyway — are exactly what a slow machine can afford to lose. Trimmed from
+    // the *front* of the list, which is the farthest, so what survives is the rank the
+    // world actually sits against.
+    const budget = Math.max(1, quality.backgroundLayers);
+    const layers = sb.layers.length > budget ? sb.layers.slice(sb.layers.length - budget) : sb.layers;
+    for (const L of layers) {
       const s = sheet(L.path);
       if (!s.ready || s.h < 1) continue;
       const hpx = L.height * z;

@@ -3,6 +3,7 @@ import type { LevelDef } from "../levels/types";
 import { clamp, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
 import { settings, SHAKE_LABELS } from "./settings";
+import { quality, TIER_LABELS } from "./quality";
 import { progress } from "./progress";
 
 /**
@@ -31,6 +32,7 @@ type UiAction =
   | { ui: "options" }
   | { ui: "close" }
   | { ui: "shake"; step: number }
+  | { ui: "quality"; step: number }
   | { ui: "tips" };
 
 export type MenuAction =
@@ -122,6 +124,7 @@ export class Menu {
       case "options": this.optionsOpen = true; break;
       case "close": this.optionsOpen = false; break;
       case "shake": settings.setShakeStep(a.step); break;
+      case "quality": quality.setStep(a.step); break;
       case "tips": settings.setTips(!settings.tips); break;
     }
   }
@@ -222,18 +225,23 @@ export class Menu {
   /**
    * Options.
    *
-   * Two controls. Screen shake is here because it is an accessibility control rather
-   * than a preference — motion sickness is not a matter of taste — and control tips
-   * because a returning player should be able to switch off a tutorial they have
-   * already had. The volume and mute rows that used to sit between them are gone with
-   * the audio (see `fx/audio.ts`).
+   * Three controls, and no more than three.
+   *
+   * EFFECTS is the one that decides whether the game runs at all on a slow machine, so
+   * it goes first and it says what it costs rather than hiding behind a number. Screen
+   * shake is next because it is an accessibility control rather than a preference —
+   * motion sickness is not a matter of taste. Control tips last, so a returning player
+   * can switch off a tutorial they have already had.
+   *
+   * The volume and mute rows that used to sit in the middle are gone with the audio
+   * (see `fx/audio.ts`).
    */
   private drawOptions(ctx: Ctx, w: number, h: number, k: number) {
     ctx.fillStyle = "rgba(10,12,18,0.82)";
     ctx.fillRect(0, 0, w, h);
 
     const pw = Math.min(420 * k, w - 40 * k);
-    const ph = 250 * k;
+    const ph = 320 * k;
     const px = w / 2 - pw / 2;
     const py = h / 2 - ph / 2;
 
@@ -250,6 +258,14 @@ export class Menu {
     const rowX = px + 24 * k;
     const rowW = pw - 48 * k;
     let ry = py + 68 * k;
+
+    ry = this.drawSteps(ctx, rowX, ry, rowW, k, "EFFECTS",
+      TIER_LABELS, quality.step, (i) => ({ kind: "ui", ui: "quality", step: i }));
+    // Said plainly, because the tier names alone do not tell a player on a slow laptop
+    // that this is the control that will fix their frame rate.
+    text(ctx, "Fewer particles and effects. Turn down if the game stutters.",
+      rowX, ry - 12 * k, 10 * k, "rgba(244,241,232,0.38)", "left", "middle", 700);
+    ry += 6 * k;
 
     ry = this.drawSteps(ctx, rowX, ry, rowW, k, "SCREEN SHAKE",
       SHAKE_LABELS, settings.shakeStep, (i) => ({ kind: "ui", ui: "shake", step: i }));

@@ -1,6 +1,7 @@
 import { TAU, clamp, rand, randSign, randSpread, smoothstep, type V } from "../core/math";
 import type { Camera } from "../core/camera";
 import { circle, rgba, worldText, type Ctx } from "../render/draw";
+import { quality } from "../ui/quality";
 
 export type PKind =
   | "spark" | "smoke" | "dust" | "fire" | "blood" | "feather"
@@ -57,18 +58,31 @@ export class Particles {
    * screen — the pool has a hard cap and nothing is allowed to pretend otherwise.
    */
   get headroom() {
-    return 1 - this.count / MAX;
+    return 1 - this.count / this.cap;
+  }
+
+  /**
+   * The *active* ceiling for the current quality tier, never above the pool itself.
+   *
+   * Read fresh each time rather than cached, so changing the setting mid-game takes
+   * effect on the next particle instead of the next level load. Above the cap the pool
+   * recycles exactly as it does when genuinely full, so LOW behaves like a smaller
+   * machine rather than like a different code path.
+   */
+  private get cap() {
+    return Math.min(MAX, quality.maxParticles);
   }
 
   private spawn(): Particle | null {
-    if (this.count >= MAX) {
+    if (this.count >= this.cap) {
       // Saturated: recycle whichever of three random candidates has the least life left.
       // Uniform recycling throws away brand-new effects as readily as dying ones, which
       // is what makes a saturated pool flicker; three samples is enough to bias strongly
       // toward the dying ones and is still O(1).
-      let best = this.pool[(Math.random() * MAX) | 0];
+      const n = this.cap;
+      let best = this.pool[(Math.random() * n) | 0];
       for (let i = 0; i < 2; i++) {
-        const c = this.pool[(Math.random() * MAX) | 0];
+        const c = this.pool[(Math.random() * n) | 0];
         if (c.life < best.life) best = c;
       }
       return best;
@@ -99,6 +113,7 @@ export class Particles {
   // ------------------------------------------------------------------ presets
 
   sparks(x: number, y: number, n: number, speed = 9, color = "#ffd23f") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       const s = speed * rand(0.35, 1);
@@ -111,6 +126,7 @@ export class Particles {
   }
 
   dust(x: number, y: number, n: number, spread = 3, color = "#cbb99a") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       this.emit("dust", x, y, {
@@ -122,6 +138,7 @@ export class Particles {
   }
 
   smoke(x: number, y: number, n: number, vy = 2, color = "#5a5f6b") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       this.emit("smoke", x, y, {
         vx: rand(-1.2, 1.2), vy: rand(0.3, 1) * vy,
@@ -132,6 +149,7 @@ export class Particles {
   }
 
   fire(x: number, y: number, n: number, speed = 5) {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       this.emit("fire", x, y, {
@@ -144,6 +162,7 @@ export class Particles {
   }
 
   blood(x: number, y: number, n: number, dir?: V, speed = 8, color = "#c0263a") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = dir ? Math.atan2(dir.y, dir.x) + rand(-0.9, 0.9) : rand(0, TAU);
       const s = speed * rand(0.2, 1);
@@ -156,6 +175,7 @@ export class Particles {
   }
 
   feathers(x: number, y: number, n: number, color = "#fff8e6") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       this.emit("feather", x, y, {
@@ -167,6 +187,7 @@ export class Particles {
   }
 
   shards(x: number, y: number, n: number, color: string, speed = 8) {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       const s = speed * rand(0.25, 1);
@@ -190,6 +211,7 @@ export class Particles {
     x: number, y: number, n: number, dirX: number, dirY: number,
     speed: number, color: string, spread = 0.75, inheritX = 0, inheritY = 0,
   ) {
+    n = quality.count(n);
     const base = Math.atan2(dirY, dirX);
     for (let i = 0; i < n; i++) {
       const a = base + randSpread(spread);
@@ -210,6 +232,7 @@ export class Particles {
    * ceiling — and a collapse reads better as a rolling front than as confetti.
    */
   collapseDust(x: number, y: number, n: number, spread = 6, color = "#c3b49b") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       this.emit("dust", x, y, {
         vx: randSign() * rand(1.5, spread), vy: rand(0.2, 1.8),
@@ -221,6 +244,7 @@ export class Particles {
 
   /** Smoke that hangs, for the half-minute *after* the blast when the site should still read as one. */
   linger(x: number, y: number, n: number, size = 1, color = "#6a6f7b") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       this.emit("smoke", x, y, {
         vx: rand(-0.6, 0.6), vy: rand(0.15, 0.7),
@@ -232,6 +256,7 @@ export class Particles {
 
   /** Sparks off metal: a tight cone along the surface, white-hot at the core, falling fast. */
   metalSparks(x: number, y: number, n: number, dirX: number, dirY: number, speed = 13) {
+    n = quality.count(n);
     const base = Math.atan2(dirY, dirX);
     for (let i = 0; i < n; i++) {
       const a = base + randSpread(0.6);
@@ -248,6 +273,7 @@ export class Particles {
 
   /** Glass, which is only worth drawing differently from rubble because it catches the light. */
   glass(x: number, y: number, n: number, dirX: number, dirY: number, speed = 9, color = "#d6f2ff") {
+    n = quality.count(n);
     const base = Math.atan2(dirY, dirX);
     for (let i = 0; i < n; i++) {
       const a = base + randSpread(1.1);
@@ -269,6 +295,7 @@ export class Particles {
   }
 
   stars(x: number, y: number, n: number, color = "#ffe45e") {
+    n = quality.count(n);
     for (let i = 0; i < n; i++) {
       const a = rand(0, TAU);
       this.emit("star", x, y, {

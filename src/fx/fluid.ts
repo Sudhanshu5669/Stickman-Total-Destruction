@@ -3,6 +3,7 @@ import type { Ctx } from "../render/draw";
 import type { SolidField } from "./solids";
 import type { PhysOwner } from "../core/physics";
 import { sfx } from "./audio";
+import { quality } from "../ui/quality";
 
 /**
  * Real 2D fluid, not a particle effect that happens to be blue.
@@ -75,6 +76,11 @@ export interface SprayOptions {
 export class WaterSim {
   count = 0;
 
+  /** Active ceiling for the current quality tier, never above the allocated pool. */
+  private get cap() {
+    return Math.min(MAX, quality.maxFluid);
+  }
+
   private readonly x = new Float32Array(MAX);
   private readonly y = new Float32Array(MAX);
   private readonly vx = new Float32Array(MAX);
@@ -143,7 +149,7 @@ export class WaterSim {
     while (n-- > 0) {
       // Recycling the oldest droplet keeps the jet continuous once the pool is full,
       // instead of the hose silently cutting out mid-stream.
-      const i = this.count < MAX ? this.count++ : this.recycle();
+      const i = this.count < this.cap ? this.count++ : this.recycle();
       const a = base + rand(-o.spread, o.spread);
       const s = o.speed * rand(0.86, 1.08);
       this.x[i] = origin.x + rand(-0.08, 0.08);
@@ -169,7 +175,7 @@ export class WaterSim {
   /** Drops a blob of loose water — used when steam condenses or a tank ruptures. */
   splash(x: number, y: number, n: number, speed = 5) {
     for (let k = 0; k < n; k++) {
-      const i = this.count < MAX ? this.count++ : this.recycle();
+      const i = this.count < this.cap ? this.count++ : this.recycle();
       const a = rand(0, Math.PI * 2);
       const s = speed * rand(0.2, 1);
       this.x[i] = x + rand(-0.2, 0.2);

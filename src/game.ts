@@ -20,6 +20,7 @@ import { progress } from "./ui/progress";
 import { TouchControls } from "./ui/touch";
 import { Coach, type CoachInput } from "./ui/coach";
 import { settings } from "./ui/settings";
+import { quality } from "./ui/quality";
 import { portal } from "./platform/portal";
 import { primeKeyLabels } from "./core/keylabel";
 import { preload } from "./render/sprites";
@@ -718,7 +719,7 @@ export class Game implements GameCtx {
           continue;
         }
       } else if (a instanceof Debris) {
-        if (++debris > CAPS.debris) {
+        if (++debris > Math.min(CAPS.debris, quality.maxDebris)) {
           a.destroy();
           continue;
         }
@@ -1022,7 +1023,14 @@ export class Game implements GameCtx {
   }
 }
 
-/** Soft limits — oldest entries are retired once exceeded, so perf degrades gracefully. */
+/**
+ * Soft limits — oldest entries are retired once exceeded, so perf degrades gracefully.
+ *
+ * These are the *authored* ceilings. Debris is additionally capped by the quality tier
+ * (see `ui/quality.ts`): it is the only one of the four that is purely decorative once
+ * it has come to rest, so it is the only one a slow machine may have less of. Cutting
+ * live projectiles or bullets instead would change what the game does, not how it looks.
+ */
 const CAPS = {
   rigidProjectiles: 90,
   creatures: 42,

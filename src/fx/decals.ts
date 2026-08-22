@@ -1,6 +1,7 @@
 import { TAU, clamp, hash01, rand } from "../core/math";
 import { rgba, type Ctx } from "../render/draw";
 import type { PhysOwner, RAPIER } from "../core/physics";
+import { quality } from "../ui/quality";
 
 /**
  * Marks the world keeps after the particles are gone: blood pools, scorch, wet
@@ -104,11 +105,20 @@ export class Decals {
     this.head = 0;
   }
 
+  /**
+   * Ground marks are the first decoration to go: they are pure cosmetics, they
+   * accumulate for the whole session rather than expiring, and every one is an extra
+   * textured fill over ground the player is already looking at. At LOW the cap is zero
+   * and this is a no-op — the blood still *sprays*, it just leaves no stain.
+   */
   private push(d: Decal) {
-    if (this.list.length < MAX) this.list.push(d);
+    const cap = Math.min(MAX, quality.maxDecals);
+    if (cap <= 0) return;
+    if (this.list.length < cap) this.list.push(d);
     else {
+      this.head %= cap;
       this.list[this.head] = d;
-      this.head = (this.head + 1) % MAX;
+      this.head = (this.head + 1) % cap;
     }
   }
 
