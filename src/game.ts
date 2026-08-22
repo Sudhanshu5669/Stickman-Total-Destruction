@@ -744,9 +744,18 @@ export class Game implements GameCtx {
     // never mid-flight — a slider dragged to OFF kills the shake on the very next frame.
     this.camera.shakeIntensity = settings.shake;
     const p = this.player.ragdoll.dead ? this.player.ragdoll.center() : this.player.pos;
-    const aim = this.player.aim;
-    // Lead the camera a third of the way to the crosshair so you can see what you hit.
-    this.camera.follow(p, (aim.x - p.x) * 0.32, (aim.y - p.y) * 0.28 + 2.2, dt);
+
+    // The crosshair's offset from the centre of the screen, -1..1, +Y up.
+    //
+    // Screen space on purpose — see `Camera.follow`. It also means touch gets this for
+    // free: the aim thumb writes into `input.mouse` in the same pixel coordinates the
+    // mouse does, so dragging the right thumb toward the edge of a phone screen looks
+    // downrange exactly as shoving a cursor there does.
+    const halfW = Math.max(1, this.camera.viewW / 2);
+    const halfH = Math.max(1, this.camera.viewH / 2);
+    const aimX = clamp((this.input.mouse.x - halfW) / halfW, -1, 1);
+    const aimY = clamp((halfH - this.input.mouse.y) / halfH, -1, 1);
+    this.camera.follow(p, aimX, aimY, dt);
 
     const speed = this.player.ragdoll.speed();
     this.camera.autoZoom(speed + this.player.launchBoost * 14, dt, BASE_ZOOM);

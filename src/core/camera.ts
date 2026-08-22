@@ -14,7 +14,7 @@ import { clamp, damp, hash01, lerp, smoothstep, v, type V } from "./math";
  * flat 40 px/m put him under 10% on a 717 px viewport, which is why the ragdoll flail —
  * the one thing this game is actually selling — did not read.
  */
-const FRAME_HEIGHT = 13.5;
+const FRAME_HEIGHT = 17;
 
 /**
  * Horizontal guarantees, applied after the height rule.
@@ -30,7 +30,7 @@ const FRAME_HEIGHT = 13.5;
  * into a tighter view than they can afford.
  */
 const MIN_FRAME_WIDTH = 10;
-const MAX_FRAME_WIDTH = 30;
+const MAX_FRAME_WIDTH = 44;
 
 /**
  * The `base` argument to `autoZoom`/`framedZoom` is a *preference*, not a literal
@@ -40,8 +40,13 @@ const MAX_FRAME_WIDTH = 30;
  */
 const REFERENCE_BASE = 40;
 
-/** Push-in on a quiet moment, and pull-out at full tilt. See `autoZoom`. */
-const QUIET_IN = 1.12;
+/**
+ * Push-in on a quiet moment, and pull-out at full tilt. See `autoZoom`.
+ *
+ * The quiet push-in is gentler than it was (1.12): with the wider resting frame it was
+ * spending a quarter of the new view before the player had done anything wrong.
+ */
+const QUIET_IN = 1.05;
 const FAST_OUT = 0.66;
 /** Speed (m/s) at which the pull-out is fully committed. A sprint is ~7, a launch ~30. */
 const SPEED_WIDE = 26;
@@ -63,6 +68,60 @@ const FRAME_UP_MAX = 3.4;
 
 /** Vertical look-ahead: seconds of the followed point's own velocity to lead by. */
 const RISE_LEAD = 0.2;
+
+/**
+ * How far aiming may pull the frame, as a fraction of the visible half-extent.
+ *
+ * Expressed as a fraction rather than in metres so an ultrawide gets more reach than a
+ * portrait phone without either being tuned separately, and so the reach grows when the
+ * camera pulls out at speed instead of staying a fixed distance into a bigger picture.
+ *
+ * 0.46 horizontally is the largest value that still leaves the player comfortably
+ * inside the frame at full deflection — past about half, the character starts leaving
+ * the screen on the opposite side, and a game where aiming loses you your own stickman
+ * is worse than one where you cannot see the target.
+ */
+const AIM_LEAD_X = 0.46;
+
+/**
+ * Vertical lead is deliberately asymmetric.
+ *
+ * Up is where everything interesting is: the top of a tower you are about to drop, the
+ * arc of a mortar round, wherever the jetpack is taking you. Down, from a stickman
+ * standing on the ground, is *dirt* — the terrain slab is six metres thick and there is
+ * nothing in it. Leading down as far as up spends a third of the frame on the inside of
+ * the floor, which is how the wider camera could have ended up feeling worse than the
+ * narrow one.
+ *
+ * Downward lead is not zero, because falling down a shaft or firing into a pit are both
+ * real, and both want a little warning of what is underneath.
+ */
+const AIM_LEAD_UP = 0.34;
+const AIM_LEAD_DOWN = 0.12;
+
+/**
+ * Cursor travel from the centre, as a fraction of the half-viewport, before the frame
+ * begins to move at all.
+ *
+ * Without a deadzone the camera drifts continuously under a resting hand, which reads
+ * as the game being unable to sit still. With one, small aiming corrections are free
+ * and only a deliberate push toward the edge of the screen asks to see further.
+ */
+const AIM_DEADZONE = 0.22;
+
+/**
+ * Maps a raw -1..1 aim offset to a smooth 0..1 pull, past the deadzone.
+ *
+ * `smoothstep` rather than a straight ramp because the interesting part of this control
+ * is the *end* of its travel — shoving the cursor at the screen edge to look downrange —
+ * and a linear map spends most of its range on the small corrections the deadzone
+ * already exists to ignore.
+ */
+function leadCurve(t: number) {
+  const a = Math.abs(t);
+  if (a <= AIM_DEADZONE) return 0;
+  return Math.sign(t) * smoothstep((a - AIM_DEADZONE) / (1 - AIM_DEADZONE));
+}
 
 /** Shake amplitude at full trauma, in CSS pixels. Screen-space so zoom can't change it. */
 const SHAKE_PX = 30;
@@ -146,8 +205,24 @@ export class Camera {
   /** This frame's spectacle envelope, advanced once per `update`. */
   private specEnv = 0;
 
-  /** Point the camera at `p`, biased `leadX/leadY` metres toward where the player is aiming. */
-  follow(p: V, leadX = 0, leadY = 0, dt = 1 / 60) {
+  /**
+   * Point the camera at `p`, biased toward where the player is aiming.
+   *
+   * `aimX` / `aimY` are the crosshair's offset from the centre of the *screen*, -1..1,
+   * with +Y up. Screen space, not world space, and that distinction is the whole fix.
+   *
+   * The previous version took a world-space delta — a fraction of the way from the
+   * player to the crosshair. That can never reveal anything outside the current frame,
+   * because the crosshair is itself bounded by the frame: the lead was capped by the
+   * very view it was supposed to extend, so aiming at the edge of the screen bought
+   * about four metres and long shots stayed blind.
+   *
+   * Reading the cursor's screen position instead breaks that loop, and cannot start
+   * another one: moving the camera does not move the mouse, so the input to this
+   * function is exactly what the player's hand is doing and nothing else. Pushing the
+   * crosshair to the edge of the screen now pans the frame that way and keeps it there.
+   */
+  follow(p: V, aimX = 0, aimY = 0, dt = 1 / 60) {
     // Vertical look-ahead is derived from the target's own motion rather than passed in,
     // so the camera needs no knowledge of jumps, jetpacks, launches or respawns: anything
     // that throws the player upward leads upward, and a long fall leans down to show the
@@ -157,10 +232,21 @@ export class Camera {
 
     this.target.x = p.x;
     this.target.y = p.y;
-    // Tighter than the old ±14/±10: at a 13.5 m frame those limits could push the player
-    // clean off the edge of the screen.
-    this.lead.x = damp(this.lead.x, clamp(leadX, -7, 7), 7, dt);
-    this.lead.y = damp(this.lead.y, clamp(leadY, -5, 5), 7, dt);
+
+    // Converted to metres here rather than by the caller, because only the camera knows
+    // the zoom and viewport the fraction is a fraction *of*.
+    const z = Math.max(1e-3, this.zoom);
+    const halfW = this.viewW / 2 / z;
+    const halfH = this.viewH / 2 / z;
+    const wantX = leadCurve(aimX) * halfW * AIM_LEAD_X;
+    const leadY = leadCurve(aimY);
+    const wantY = leadY * halfH * (leadY >= 0 ? AIM_LEAD_UP : AIM_LEAD_DOWN);
+
+    // Eased more slowly than the old ±7 m lead was (7/s): this travels three times as
+    // far, and at the old rate the frame lurched every time the cursor crossed the
+    // deadzone. Slow enough to read as a deliberate look, fast enough not to feel late.
+    this.lead.x = damp(this.lead.x, wantX, 4.5, dt);
+    this.lead.y = damp(this.lead.y, wantY, 4.5, dt);
   }
 
   /**
@@ -252,7 +338,12 @@ export class Camera {
     // The whole vertical budget is clamped rather than each contributor, so aim lead,
     // look-ahead and framing share one honest limit and no combination of them can bury
     // the player at the top or bottom edge.
-    const offY = clamp(this.lead.y + this.rise + up, -halfH * 0.34, halfH * 0.5);
+    // The whole vertical budget shares one honest limit, but not a symmetric one. The
+    // upward allowance was 0.5 and is the thing that was quietly eating the aim lead:
+    // `up` alone already spends most of it, leaving under a metre for aiming even at
+    // full deflection. 0.66 lets a deliberate look upward actually show the top of the
+    // tower, while still leaving the player a quarter of the frame beneath them.
+    const offY = clamp(this.lead.y + this.rise + up, -halfH * 0.34, halfH * 0.66);
 
     let tx = this.target.x + this.lead.x;
     let ty = this.target.y + offY;
