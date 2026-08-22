@@ -344,6 +344,49 @@ export const AMMO: AmmoDef[] = [
       game.fire.jet(muzzle, dir, dt, { speed: 42, spread: 0.075, rate: 150, life: 1.5 });
     },
   },
+  /**
+   * The frag grenade. The first round in the game and, for one contract, the only one.
+   *
+   * Listed *last* despite being first in the story. This array is the wheel order and
+   * the default selection is index 0, so putting the story's opening round at the front
+   * would quietly replace the chicken cannon as the thing every sandbox opens on. The
+   * contract issues it by name through `loadout`, so its position here is free to serve
+   * the sandboxes instead.
+   *
+   * Deliberately the *hardest* round to use well, which is why it goes first. It is
+   * lobbed rather than fired, so range is a function of how far above the target you
+   * aim; it bounces, so a bad angle sends it back at you; and the two-second fuse means
+   * a hit is a prediction rather than a reaction. Learn those three things and every
+   * ballistic round later in the arsenal is already understood.
+   *
+   * Unlimited, because a player still learning the arc must not also be rationing. The
+   * one-second cooldown is what paces it — you get roughly one considered throw per
+   * engagement, not a stream.
+   */
+  {
+    id: "grenade",
+    name: "Frag Grenade",
+    tagline: "Two seconds. Aim high.",
+    tint: "#8fae56",
+    // 24 m/s under -26 gravity is a ~22m throw at the best angle. That is deliberately
+    // just longer than the reach of everything shooting at you in the first contract:
+    // the player out-ranges the map by a couple of metres, so closing the distance is a
+    // choice rather than the only option.
+    count: 1, spread: 0.015, speed: 24, speedVar: 0, cooldown: 1.0,
+    recoil: 1.4, heft: 0.34, auto: false, reserve: -1, muzzle: 0.85,
+    spawn: makeRigid(rigid({
+      shape: "ball", w: 0.42, h: 0.42, density: 260,
+      // Lively enough to roll through a doorway, damped enough not to skitter away.
+      restitution: 0.42, friction: 0.5, angularDamping: 0.6, gravityScale: 1,
+      fuse: 2.0,
+      // A full-speed direct hit carries ~13 kJ, so the 8 kJ threshold detonates a clean
+      // shot on contact while a lob or a bounce keeps cooking. That split is the whole
+      // weapon: hit them and it goes off now, miss and you have two seconds of a live
+      // grenade rolling somewhere — including back down a slope at you.
+      explode: { radius: 5.4, force: 19, damage: 210, minEnergy: 8 },
+      draw: P.drawGrenade, points: 90, life: 6, impactSound: "metal",
+    })),
+  },
 ];
 
 export const AMMO_BY_ID = new Map(AMMO.map((a) => [a.id, a]));

@@ -1,7 +1,8 @@
 import type { Camera } from "../core/camera";
 import { clamp, hash01, TAU } from "../core/math";
 import { shade, type Ctx } from "./draw";
-import type { Theme } from "./theme";
+import type { SpriteBackdrop, Theme } from "./theme";
+import { sheet } from "./sprites";
 
 /**
  * Parallax backdrop drawn in screen space before the camera transform, so each layer
@@ -109,6 +110,15 @@ export class Background {
     // Horizon is where world Y = 0 lands on screen, so backdrop and terrain agree.
     const horizon = h / 2 + cam.pos.y * z;
 
+    // A painted world takes the whole backdrop: sky, distance and ridges are all in the
+    // artwork, so none of the generated layers below would be visible even if drawn.
+    // The subsurface still runs — it is what stops sky showing under a blown crater.
+    if (th.sprites) {
+      this.drawSpriteBackdrop(ctx, cam, w, h, horizon, z, th.sprites);
+      this.drawSubsurface(ctx, w, h, horizon, z, th);
+      return;
+    }
+
     // Sky panel is anchored to the horizon rather than the viewport, so climbing on the
     // jetpack actually flies you up into the darker, more saturated top of the sky.
     const sy = horizon - this.skyAnchor;
@@ -124,6 +134,46 @@ export class Background {
     this.blit(ctx, this.skylineNear, cam, w, horizon, z, D_SKYLINE, 0, 0);
     this.drawHills(ctx, cam, w, h, horizon, z, th);
     this.drawSubsurface(ctx, w, h, horizon, z, th);
+  }
+
+  /**
+   * The painted alternative to everything above: image layers, tiled across the
+   * viewport, each scrolling at its own rate.
+   *
+   * Deliberately not baked into strips like the generated layers are. These sheets are
+   * already single bitmaps the GPU can blit directly, and the whole backdrop comes to
+   * one `drawImage` per layer per screen-width — cheaper than the code path it replaces,
+   * with none of the re-bake cost when a viewport changes.
+   *
+   * Layers are anchored by their **bottom** edge to the horizon so every one of them
+   * shares the world's ground line, which is what keeps six independently-scrolling
+   * images reading as one continuous distance.
+   */
+  private drawSpriteBackdrop(
+    ctx: Ctx, cam: Camera, w: number, h: number, horizon: number, z: number, sb: SpriteBackdrop,
+  ) {
+    ctx.fillStyle = sb.sky;
+    ctx.fillRect(0, 0, w, h);
+
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const L of sb.layers) {
+      const s = sheet(L.path);
+      if (!s.ready || s.h < 1) continue;
+      const hpx = L.height * z;
+      const wpx = hpx * (s.w / s.h);
+      const y = horizon - L.lift * z - hpx;
+      // Off the top of the frame entirely — happens the moment the jetpack gets going.
+      if (wpx < 1 || y > h || y + hpx < 0) continue;
+      const off = cam.pos.x * z * L.depth;
+      ctx.globalAlpha = L.alpha ?? 1;
+      // The +1 overlap hides the hairline of background that fractional tile widths
+      // otherwise leave between repeats.
+      for (let x = -(((off % wpx) + wpx) % wpx); x < w; x += wpx) {
+        ctx.drawImage(s.img, x, y, wpx + 1, hpx);
+      }
+    }
+    ctx.restore();
   }
 
   /**
@@ -216,7 +266,9 @@ export class Background {
    * of them for one effect is the definition of wasted overdraw.
    */
   drawHaze(ctx: Ctx, w: number, h: number, th: Theme, cam: Camera | null = this.cam) {
-    if (cam) this.drawForeground(ctx, cam, w, h, th);
+    // Painted worlds bring their own foreground, as props with a z above the player.
+    // The generated silhouette is a different drawing language and reads as a bug.
+    if (cam && !th.sprites) this.drawForeground(ctx, cam, w, h, th);
 
     if (th.ambient && th.ambientAlpha) {
       // Tints the whole frame, which is what sells "night" or "under a green sun".

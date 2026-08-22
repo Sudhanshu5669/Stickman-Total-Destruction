@@ -38,6 +38,8 @@ export class Input {
   virtualCrouch = false;
   /** Latched ammo cycle from the on-screen swap buttons; consumed like a key edge. */
   virtualCycle = 0;
+  /** Latched go-limp tap from the on-screen button. */
+  virtualLimpPressed = false;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     // Start at the centre of the viewport. Leaving it at (0,0) would make the very
@@ -145,6 +147,11 @@ export class Input {
     return this.held("KeyS", "ArrowDown") || this.virtualCrouch;
   }
 
+  /** Go limp, either source. */
+  limpPressed() {
+    return this.pressed("KeyR") || this.virtualLimpPressed;
+  }
+
   /**
    * Discards latched edges. Call this exactly once per consumer pass — i.e. after each
    * fixed simulation step — so every press is seen by exactly one step.
@@ -158,9 +165,20 @@ export class Input {
     this.wheel = 0;
     this.virtualJumpPressed = false;
     this.virtualCycle = 0;
+    this.virtualLimpPressed = false;
   }
 }
 
+/**
+ * Keys whose browser default would fight the game.
+ *
+ * `Backspace` is here because it is our back/pause key and older browsers still map it
+ * to history-back — on a portal that navigates the *whole page* away, not the frame.
+ *
+ * `Escape` is deliberately absent, and not bound to anything: the portal wraps the
+ * game in its own fullscreen, so Escape belongs to the player's way out. Swallowing it
+ * would trap them, and binding it would fire our action and drop fullscreen at once.
+ */
 const SWALLOW = new Set([
-  "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Slash", "Quote",
+  "Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab", "Slash", "Quote", "Backspace",
 ]);

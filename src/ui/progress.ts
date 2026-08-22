@@ -22,6 +22,10 @@ const KEY_FIRSTS = "stickman.firsts";
 const KEY_STREAK = "stickman.streak";
 const KEY_ADS = "stickman.ads";
 const KEY_MEDALS = "stickman.medals";
+/** The jetpack is story equipment, not a purchase: earned once, kept forever. */
+const KEY_JETPACK = "stickman.jetpack";
+/** How far the contract story has been taken. 0 = the intro has not been watched. */
+const KEY_CONTRACT = "stickman.contract";
 
 function read(key: string, fallback: number): number {
   try {
@@ -384,6 +388,36 @@ export const progress = {
     return order <= this.cleared + 1;
   },
 
+  // ------------------------------------------------------------------ the story
+
+  /**
+   * Contracts finished. Doubles as the story cursor, so `>= 1` also means the intro
+   * has been seen and must never be forced on this player again.
+   */
+  get contract() {
+    return Math.max(0, Math.floor(read(KEY_CONTRACT, 0)));
+  },
+
+  finishContract(order: number) {
+    if (order > this.contract) write(KEY_CONTRACT, order);
+  },
+
+  /**
+   * Whether the jetpack has been picked up.
+   *
+   * Kept out of the carnage economy on purpose. Everything in `ARSENAL` is bought with
+   * points and is therefore a number the player is grinding toward; the jetpack is a
+   * thing that happens *to* them at a specific moment in a specific room, and pricing
+   * it would turn the one earned moment in the game into another progress bar.
+   */
+  get hasJetpack() {
+    return read(KEY_JETPACK, 0) > 0;
+  },
+
+  grantJetpack() {
+    write(KEY_JETPACK, 1);
+  },
+
   get bestDistance() {
     return read(KEY_ENDLESS, 0);
   },
@@ -671,5 +705,7 @@ export const progress = {
         /* nothing to clear */
       }
     }
+    write(KEY_JETPACK, 0);
+    write(KEY_CONTRACT, 0);
   },
 };

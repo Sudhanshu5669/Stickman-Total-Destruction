@@ -150,6 +150,17 @@ export class Player implements Actor {
   /** Rises while airborne after a big recoil shot, purely for the camera to react to. */
   launchBoost = 0;
 
+  /**
+   * Whether the pack is on the player's back at all.
+   *
+   * False for the whole of the first contract. The jetpack is the game's one piece of
+   * earned equipment, and a level designed around not having it has to actually not
+   * have it — gating only the *fuel* would leave the pack drawn, the HUD gauge showing,
+   * and the player pressing a key that silently does nothing, which reads as a bug
+   * rather than as a thing they have not been given yet.
+   */
+  hasJetpack = true;
+
   /** Seconds of jetpack burn remaining. */
   fuel = TUNE.jetFuelMax;
   /** Smoothed 0..1 throttle, used for the exhaust, the audio and the HUD. */
@@ -232,6 +243,8 @@ export class Player implements Actor {
   }
 
   get fuelFrac() {
+    // -1 tells the HUD there is no gauge to draw, which is different from an empty one.
+    if (!this.hasJetpack) return -1;
     return clamp(this.fuel / TUNE.jetFuelMax, 0, 1);
   }
 
@@ -602,6 +615,12 @@ export class Player implements Actor {
    * added on top, which keeps the pack feeling the same on every world.
    */
   private jetpack(dt: number) {
+    // No pack, no flight. The jump itself still works — that is legs, not equipment.
+    if (!this.hasJetpack) {
+      this.jetLit = false;
+      this.jetThrottle = damp(this.jetThrottle, 0, 12, dt);
+      return;
+    }
     // God mode runs the pack off an infinite tank: no burn, no refill wait.
     if (this.god) this.fuel = TUNE.jetFuelMax;
     const wants = this.wantJumpHeld && !this.grounded && this.fuel > 0;

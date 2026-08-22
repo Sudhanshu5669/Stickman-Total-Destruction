@@ -21,20 +21,54 @@ const KEY = "stickman.settings.v1";
 export const SHAKE_STEPS: readonly number[] = [0, 0.35, 0.7, 1];
 export const SHAKE_LABELS: readonly string[] = ["OFF", "LOW", "MEDIUM", "FULL"];
 
+/**
+ * Master volume stops, as a multiplier on the mixer's master gain.
+ *
+ * Stepped for the same reason the shake control is: this is a canvas widget operated
+ * with a thumb, and four hittable stops beat a track nobody can land on. The top stop
+ * is the mix as it was tuned — nothing here can push the output above that, so the
+ * limiter never sees a level it was not designed for.
+ *
+ * Deliberately *not* a replacement for mute. A player who wants silence reaches for
+ * the speaker icon, and finding it at 25% instead would be a broken promise.
+ */
+export const VOLUME_STEPS: readonly number[] = [0.25, 0.5, 0.75, 1];
+export const VOLUME_LABELS: readonly string[] = ["25", "50", "75", "100"];
+
 interface Stored {
   shake: number;
   tips: boolean;
+  volume: number;
+  /**
+   * Whether the player muted the game.
+   *
+   * Persisted because a mute is a *statement*, not a per-session accident: somebody
+   * playing on a train and muting the game means it every time, and re-muting on every
+   * load is exactly the kind of small friction that ends a session early.
+   */
+  muted: boolean;
+}
+
+function clampStep(x: unknown, steps: readonly number[], fallback: number): number {
+  return Number.isFinite(x) ? Math.max(0, Math.min(steps.length - 1, Math.floor(x as number))) : fallback;
 }
 
 function load(): Stored {
-  const fallback: Stored = { shake: SHAKE_STEPS.length - 1, tips: true };
+  const fallback: Stored = {
+    shake: SHAKE_STEPS.length - 1,
+    tips: true,
+    volume: VOLUME_STEPS.length - 1,
+    muted: false,
+  };
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return fallback;
     const d = JSON.parse(raw) as Partial<Stored>;
     return {
-      shake: Number.isFinite(d.shake) ? Math.max(0, Math.min(SHAKE_STEPS.length - 1, Math.floor(d.shake as number))) : fallback.shake,
+      shake: clampStep(d.shake, SHAKE_STEPS, fallback.shake),
       tips: d.tips !== false,
+      volume: clampStep(d.volume, VOLUME_STEPS, fallback.volume),
+      muted: d.muted === true,
     };
   } catch {
     return fallback;
@@ -82,6 +116,36 @@ export const settings = {
 
   setTips(on: boolean) {
     state.tips = on;
+    save();
+  },
+
+  // ------------------------------------------------------------------- audio
+
+  /** Index into `VOLUME_STEPS`. */
+  get volumeStep() {
+    return state.volume;
+  },
+
+  setVolumeStep(i: number) {
+    state.volume = Math.max(0, Math.min(VOLUME_STEPS.length - 1, Math.floor(i)));
+    save();
+  },
+
+  /** Master gain the mixer should sit at, ignoring mute. */
+  get volume() {
+    return VOLUME_STEPS[state.volume] ?? 1;
+  },
+
+  get volumeLabel() {
+    return VOLUME_LABELS[state.volume] ?? "100";
+  },
+
+  get muted() {
+    return state.muted;
+  },
+
+  setMuted(on: boolean) {
+    state.muted = on;
     save();
   },
 };

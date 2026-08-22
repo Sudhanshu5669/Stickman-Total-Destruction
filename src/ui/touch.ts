@@ -53,10 +53,17 @@ export class TouchControls {
   private swapLeft = { x: 0, y: 0, w: 0, h: 0 };
   private swapRight = { x: 0, y: 0, w: 0, h: 0 };
   private pauseBtn = { x: 0, y: 0, w: 0, h: 0 };
+  /**
+   * Go limp. Keyboard players have had this on R since the start; without a button it
+   * simply did not exist on a phone, which left the coach with a lesson it could not
+   * illustrate and mobile players without a mechanic the game is partly built around.
+   */
+  private limpBtn = { x: 0, y: 0, w: 0, h: 0 };
   private tappedSwap = 0;
+  private tappedLimp = false;
   /** Set for one frame when the on-screen pause button is hit. */
   pausePressed = false;
-  private flash = { left: 0, right: 0, pause: 0 };
+  private flash = { left: 0, right: 0, pause: 0, limp: 0 };
 
   constructor(private readonly canvas: HTMLCanvasElement, private readonly input: Input) {
     canvas.addEventListener("pointerdown", this.onDown, { passive: false });
@@ -113,6 +120,11 @@ export class TouchControls {
       this.flash.right = 1;
       return;
     }
+    if (this.hit(this.limpBtn, p)) {
+      this.tappedLimp = true;
+      this.flash.limp = 1;
+      return;
+    }
 
     const half = this.canvas.clientWidth * 0.42;
     if (p.x < half && !this.move) {
@@ -157,7 +169,7 @@ export class TouchControls {
    * it, so a touch and the step that consumes it land on the same frame.
    */
   update(dt: number) {
-    for (const k of ["left", "right", "pause"] as const) {
+    for (const k of ["left", "right", "pause", "limp"] as const) {
       this.flash[k] = Math.max(0, this.flash[k] - dt * 4);
     }
     if (!this.active) return;
@@ -197,6 +209,11 @@ export class TouchControls {
     if (this.tappedSwap) {
       inp.virtualCycle = this.tappedSwap;
       this.tappedSwap = 0;
+    }
+
+    if (this.tappedLimp) {
+      inp.virtualLimpPressed = true;
+      this.tappedLimp = false;
     }
   }
 
@@ -240,6 +257,10 @@ export class TouchControls {
     const btnY = h - pad - ammoBand - bs;
     this.swapRight = { x: w - pad - bs, y: btnY, w: bs, h: bs };
     this.swapLeft = { x: w - pad - bs * 2 - 10 * k, y: btnY, w: bs, h: bs };
+    // Stacked directly above the swap keys rather than mirrored into the bottom-left,
+    // which belongs to the movement stick, or the top-right, which the HUD's score and
+    // lives already own. Same column, same size, one row up.
+    this.limpBtn = { x: this.swapRight.x, y: btnY - bs - 10 * k, w: bs, h: bs };
     const ps = Math.max(52, 46 * k);
     this.pauseBtn = { x: pad, y: pad, w: ps, h: ps };
 
@@ -247,6 +268,7 @@ export class TouchControls {
 
     this.button(ctx, this.swapLeft, "‹", k, this.flash.left);
     this.button(ctx, this.swapRight, "›", k, this.flash.right);
+    this.limpGlyph(ctx, k);
     this.pauseGlyph(ctx, k);
 
     if (this.move) {
@@ -294,6 +316,51 @@ export class TouchControls {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(glyph, b.x + b.w / 2, b.y + b.h / 2);
+  }
+
+  /**
+   * The go-limp key: a stickman falling over. Drawn rather than lettered because "R"
+   * means nothing to a thumb, and "LIMP" does not fit in a 64px square at a size
+   * anybody can read.
+   */
+  private limpGlyph(ctx: Ctx, k: number) {
+    const b = this.limpBtn;
+    const f = this.flash.limp;
+    const live = this.input.limpPressed();
+    ctx.fillStyle = `rgba(20,23,31,${0.4 + f * 0.4})`;
+    ctx.beginPath();
+    ctx.roundRect(b.x, b.y, b.w, b.h, b.w * 0.24);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,${0.14 + f * 0.5})`;
+    ctx.lineWidth = 1.5 * k;
+    ctx.stroke();
+
+    // A figure tipped onto its back, limbs slack.
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    const s = b.w * 0.3;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(1.35);
+    ctx.strokeStyle = rgba("#ffd23f", live || f > 0 ? 0.95 : 0.66);
+    ctx.lineWidth = Math.max(2, b.w * 0.055);
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.arc(0, -s * 0.78, s * 0.26, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -s * 0.5);
+    ctx.lineTo(0, s * 0.34);
+    ctx.moveTo(0, -s * 0.24);
+    ctx.lineTo(-s * 0.56, s * 0.1);
+    ctx.moveTo(0, -s * 0.24);
+    ctx.lineTo(s * 0.5, s * 0.2);
+    ctx.moveTo(0, s * 0.34);
+    ctx.lineTo(-s * 0.42, s * 0.82);
+    ctx.moveTo(0, s * 0.34);
+    ctx.lineTo(s * 0.46, s * 0.78);
+    ctx.stroke();
+    ctx.restore();
   }
 
   private pauseGlyph(ctx: Ctx, k: number) {

@@ -1,13 +1,16 @@
-import { CAMPAIGN, DAILY, ENDLESS, PLAYGROUND } from "../levels";
+import { CAMPAIGN, CONTRACTS, DAILY, ENDLESS, PLAYGROUND } from "../levels";
 import type { LevelDef } from "../levels/types";
-import { THEMES } from "../render/theme";
+import { THEMES, type Theme } from "../render/theme";
 import { clamp, hash01, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
 import { ARSENAL, previousCost, progress } from "./progress";
-import { SHAKE_LABELS, settings } from "./settings";
+import { SHAKE_LABELS, VOLUME_LABELS, settings } from "./settings";
 import { AMMO_BY_ID } from "../weapons/ammo";
 import { secondsUntilRollover } from "../core/rng";
 import { iconBitmap } from "../render/props";
+import { keyLabel } from "../core/keylabel";
+import { blitTiles, sheet } from "../render/sprites";
+import { sfx } from "../fx/audio";
 
 const CREAM = "#f4f1e8";
 const GOLD = "#ffd23f";
@@ -27,6 +30,7 @@ type UiAction =
   | { ui: "options" }
   | { ui: "close" }
   | { ui: "shake"; step: number }
+  | { ui: "volume"; step: number }
   | { ui: "tips" };
 
 export type MenuAction =
@@ -108,17 +112,38 @@ function nextMission(): LevelDef {
   return CAMPAIGN[clamp(done, 0, CAMPAIGN.length - 1)];
 }
 
+/** The contract the story is up to, or null once every one of them is done. */
+function nextContract(): LevelDef | null {
+  return progress.contract < CONTRACTS.length ? CONTRACTS[progress.contract] : null;
+}
+
+/**
+ * What the front page's big button does.
+ *
+ * The story comes first while there *is* story: a new player pressing the only button
+ * on the screen should get the opening, not a sandbox. Once the contracts are finished
+ * it reverts to the world built to teach the arsenal, which is what a returning player
+ * with nothing left to unlock actually wants.
+ */
+function quickPlay(): LevelDef {
+  return nextContract() ?? PLAYGROUND[0];
+}
+
 const MODES: ModeCard[] = [
   {
     screen: "campaign",
-    title: "CAMPAIGN",
-    accent: "#e8433a",
+    title: "CONTRACTS",
+    accent: "#8fae56",
+    // Leads with the story while there is story left, then falls back to the older
+    // mission list rather than going blank.
     status: () => {
+      const c = nextContract();
+      if (c) return `CONTRACT ${c.order} · ${c.name.toUpperCase()}`;
       const m = nextMission();
       return progress.cleared >= CAMPAIGN.length ? "ALL CLEAR" : `MISSION ${m.order} · ${m.name.toUpperCase()}`;
     },
     browse: "ALL MISSIONS",
-    quick: nextMission,
+    quick: () => nextContract() ?? nextMission(),
   },
   {
     screen: "endless",
@@ -141,8 +166,6 @@ const MODES: ModeCard[] = [
   },
 ];
 
-/** What the PLAY button drops you into. The one world built to teach the arsenal. */
-const QUICK_PLAY = PLAYGROUND[0];
 
 /**
  * The front end: mode select, its three sub-screens, and the pause overlay.
@@ -193,7 +216,7 @@ export class Menu {
   get level(): LevelDef {
     if (this.screen === "root") {
       const i = this.selected;
-      if (i === 0) return QUICK_PLAY;
+      if (i === 0) return quickPlay();
       // Arrowing across the front page tours the worlds behind it: each card previews
       // whatever it would drop you into.
       return MODES[i - 1].quick() ?? PLAYGROUND[clamp(this.sel.playground, 0, PLAYGROUND.length - 1)];
@@ -213,13 +236,27 @@ export class Menu {
     return PLAYGROUND.find((p) => p.theme === l.theme) ?? PLAYGROUND[0];
   }
 
+  /**
+   * Closes the options panel if it is open, reporting whether it did.
+   *
+   * Exists so the pause screen's back key can dismiss the panel instead of unpausing
+   * the game out from under it — the panel is drawn over the pause menu, so backing
+   * out of the thing on top is what the press obviously means.
+   */
+  closeOptions(): boolean {
+    if (!this.optionsOpen) return false;
+    this.optionsOpen = false;
+    return true;
+  }
+
   goTo(screen: Screen) {
     this.screen = screen;
     this.hovered = -1;
     this.lift = [];
   }
 
-  /** Escape / back: options close first, then a sub-screen returns to the front page. */
+  /** Back (Backspace, or the on-screen arrow): options close first, then a sub-screen
+   * returns to the front page. Not Escape — the portal owns that key for fullscreen. */
   back(): boolean {
     if (this.optionsOpen) {
       this.optionsOpen = false;
@@ -260,7 +297,7 @@ export class Menu {
     }
     if (this.screen === "root") {
       const i = this.selected;
-      const quick = i === 0 ? QUICK_PLAY : MODES[i - 1].quick();
+      const quick = i === 0 ? quickPlay() : MODES[i - 1].quick();
       if (quick) return { kind: "play", level: quick };
       return { kind: "screen", screen: MODES[i - 1].screen };
     }
@@ -326,6 +363,10 @@ export class Menu {
       case "options": this.optionsOpen = true; break;
       case "close": this.optionsOpen = false; break;
       case "shake": settings.setShakeStep(a.step ?? 0); break;
+      // Routed through `sfx` rather than `settings` directly: it owns writing the
+      // preference *and* moving the live master gain, and doing only the first would
+      // leave the panel showing a stop the mix is not actually at.
+      case "volume": sfx.setVolumeStep(a.step ?? 0); break;
       case "tips": settings.setTips(!settings.tips); break;
     }
   }
@@ -386,18 +427,24 @@ export class Menu {
   // ---------------------------------------------------------------- options
 
   /**
-   * Sound, screen shake and tips.
+   * Sound, volume, screen shake and tips.
    *
    * Screen shake is here because it is an accessibility control, not a preference:
    * this game shakes the camera on every impact and a meaningful number of players
    * cannot tolerate that for sixty seconds. OFF is a true zero.
+   *
+   * Volume is here for the neighbouring reason. A single SOUND switch makes the only
+   * answer to "this is too loud" the same as the answer to "I want silence", and on a
+   * portal — where the game shares a page with whatever else is open — that is a
+   * choice a lot of players resolve by leaving. The stops scale the tuned mix; they
+   * never push past it.
    */
   private drawOptions(ctx: Ctx, w: number, h: number, k: number, muted: boolean) {
     ctx.fillStyle = "rgba(8,10,16,0.86)";
     ctx.fillRect(0, 0, w, h);
 
     const pw = Math.min(420 * k, w - 40 * k);
-    const ph = 306 * k;
+    const ph = 392 * k;
     const px = w / 2 - pw / 2;
     const py = h / 2 - ph / 2;
 
@@ -414,23 +461,14 @@ export class Menu {
     const rowW = pw - 48 * k;
     let ry = py + 76 * k;
 
-    // Screen shake, as four labelled stops rather than a drag track — a segmented
-    // control is hittable with a thumb and a mouse alike, and each stop is a word.
-    text(ctx, "SCREEN SHAKE", rowX, ry, 12 * k, "rgba(244,241,232,0.6)", "left", "middle", 800);
-    ry += 22 * k;
-    const segW = rowW / SHAKE_LABELS.length;
-    const segH = 34 * k;
-    SHAKE_LABELS.forEach((label, i) => {
-      const sxx = rowX + i * segW;
-      const on = settings.shakeStep === i;
-      const hot = this.regionHovered(sxx, ry, segW, segH);
-      this.regions.push({ x: sxx, y: ry, w: segW, h: segH, action: { kind: "ui", ui: "shake", step: i } });
-      ctx.fillStyle = on ? GOLD : hot ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)";
-      roundRect(ctx, sxx + 2 * k, ry, segW - 4 * k, segH, 7 * k);
-      ctx.fill();
-      text(ctx, label, sxx + segW / 2, ry + segH / 2 + 1 * k, 11 * k, on ? "#141820" : CREAM, "center", "middle", 900);
-    });
-    ry += segH + 30 * k;
+    // Both of these are labelled stops rather than drag tracks — a segmented control
+    // is hittable with a thumb and a mouse alike, and each stop is a word.
+    ry = this.segmented(ctx, rowX, ry, rowW, k, "SCREEN SHAKE", SHAKE_LABELS, settings.shakeStep,
+      (i) => ({ kind: "ui", ui: "shake", step: i }));
+    // Dimmed while muted: the stops still work, but they are not what is silencing
+    // the game, and a live-looking control that changes nothing is worse than none.
+    ry = this.segmented(ctx, rowX, ry, rowW, k, "VOLUME", VOLUME_LABELS, settings.volumeStep,
+      (i) => ({ kind: "ui", ui: "volume", step: i }), muted);
 
     ry = this.drawToggle(ctx, rowX, ry, rowW, k, "SOUND", !muted, { kind: "mute" });
     ry = this.drawToggle(ctx, rowX, ry, rowW, k, "CONTROL TIPS", settings.tips, { kind: "ui", ui: "tips" });
@@ -444,6 +482,36 @@ export class Menu {
     roundRect(ctx, rowX, by, bw, bh, 10 * k);
     ctx.fill();
     text(ctx, "DONE", w / 2, by + bh / 2 + 1 * k, 16 * k, CREAM, "center", "middle", 900);
+  }
+
+  /**
+   * One labelled row of mutually exclusive stops. Returns the Y to carry on from.
+   *
+   * `dim` greys the whole row without disabling it — used for volume while the game is
+   * muted, where the control is still meaningful but is not the one in charge.
+   */
+  private segmented(
+    ctx: Ctx, x: number, y: number, w: number, k: number,
+    label: string, labels: readonly string[], current: number,
+    action: (i: number) => MenuAction, dim = false,
+  ) {
+    const a = dim ? 0.45 : 1;
+    text(ctx, label, x, y, 12 * k, `rgba(244,241,232,${0.6 * a})`, "left", "middle", 800);
+    y += 22 * k;
+    const segW = w / labels.length;
+    const segH = 34 * k;
+    labels.forEach((seg, i) => {
+      const sx = x + i * segW;
+      const on = current === i;
+      const hot = this.regionHovered(sx, y, segW, segH);
+      this.regions.push({ x: sx, y, w: segW, h: segH, action: action(i) });
+      ctx.fillStyle = on ? rgbaHex(GOLD, a) : hot ? "rgba(255,255,255,0.14)" : "rgba(255,255,255,0.06)";
+      roundRect(ctx, sx + 2 * k, y, segW - 4 * k, segH, 7 * k);
+      ctx.fill();
+      text(ctx, seg, sx + segW / 2, y + segH / 2 + 1 * k, 11 * k,
+        on ? "#141820" : `rgba(244,241,232,${a})`, "center", "middle", 900);
+    });
+    return y + segH + 26 * k;
   }
 
   /** One labelled on/off row. Returns the Y to carry on drawing from. */
@@ -501,11 +569,11 @@ export class Menu {
     const playX = w / 2 - playW / 2;
     const playLift = this.lift[0] ?? 0;
     const playY = h * 0.36 - playLift * 4 * k;
-    this.regions.push({ x: playX, y: playY, w: playW, h: playH, action: { kind: "play", level: QUICK_PLAY } });
+    this.regions.push({ x: playX, y: playY, w: playW, h: playH, action: { kind: "play", level: quickPlay() } });
     if (this.regionHovered(playX, playY, playW, playH)) this.hovered = 0;
     this.drawPlayHero(ctx, playX, playY, playW, playH, k, this.selected === 0 || playLift > 0.4);
 
-    text(ctx, `NO MENUS. STRAIGHT INTO ${QUICK_PLAY.name.toUpperCase()}.`, w / 2, playY + playH + 18 * k,
+    text(ctx, `NO MENUS. STRAIGHT INTO ${quickPlay().name.toUpperCase()}.`, w / 2, playY + playH + 18 * k,
       12 * k, "rgba(244,241,232,0.45)", "center", "middle", 800);
 
     // ------------------------------------------------------------------ modes
@@ -542,7 +610,7 @@ export class Menu {
     // ------------------------------------------------------------------ arsenal
     this.drawArsenalBar(ctx, w, h - (narrow ? 108 : 116) * k, k);
 
-    text(ctx, narrow ? "TAP PLAY" : "ENTER  play     ↓  browse     ←  →  choose     M  sound",
+    text(ctx, narrow ? "TAP PLAY" : `ENTER  play     ↓  browse     ←  →  choose     ${keyLabel("KeyM")}  sound`,
       w / 2, h - 20 * k, 12 * k, "rgba(244,241,232,0.38)", "center", "middle", 700);
   }
 
@@ -746,7 +814,7 @@ export class Menu {
     });
 
     this.drawPlayButton(ctx, w, cardY + cardH + 40 * k, k, "PLAY", this.level);
-    this.drawFooter(ctx, w, h, k, "← →  choose world     ENTER  play     ESC  back");
+    this.drawFooter(ctx, w, h, k, "← →  choose world     ENTER  play     BACKSPACE  back");
   }
 
   // ---------------------------------------------------------------- campaign
@@ -786,7 +854,7 @@ export class Menu {
       text(ctx, `Clear mission ${(sel.order ?? 1) - 1} to unlock this one.`, w / 2, by + 30 * k,
         15 * k, "rgba(244,241,232,0.45)", "center", "middle", 800);
     }
-    this.drawFooter(ctx, w, h, k, "← →  choose mission     ENTER  deploy     ESC  back");
+    this.drawFooter(ctx, w, h, k, "← →  choose mission     ENTER  deploy     BACKSPACE  back");
   }
 
   private drawMissionCard(
@@ -888,7 +956,7 @@ export class Menu {
 
     this.drawPlayButton(ctx, w, y + cardH + 96 * k, k,
       this.level === DAILY ? "PLAY TODAY'S RUN" : "START RUN", this.level);
-    this.drawFooter(ctx, w, h, k, "← →  choose     ENTER  start     ESC  back");
+    this.drawFooter(ctx, w, h, k, "← →  choose     ENTER  start     BACKSPACE  back");
   }
 
   // ---------------------------------------------------------------- shared bits
@@ -1053,7 +1121,7 @@ export class Menu {
       { label: "OPTIONS", action: { kind: "ui", ui: "options" } },
       { label: "MAIN MENU", action: { kind: "quit" } },
     ]);
-    text(ctx, "ESC to resume", w / 2, top + 4 * 64 * k + 6 * k, 12 * k, "rgba(244,241,232,0.35)", "center", "middle", 700);
+    text(ctx, `${keyLabel("KeyP")} to resume`, w / 2, top + 4 * 64 * k + 6 * k, 12 * k, "rgba(244,241,232,0.35)", "center", "middle", 700);
   }
 
   // ------------------------------------------------------------------ results
@@ -1079,23 +1147,45 @@ export class Menu {
     const primaryW = Math.min(460 * k, w - 48 * k);
     const primaryY = h - primaryH - (narrow ? 74 : 86) * k;
 
-    // Whichever action carries the run forward is the big one, and it is the same
-    // action SPACE takes — a visual default that disagrees with the keyboard default
-    // is a trap, so the order here mirrors `handleResultInput`.
-    const primary: { label: string; sub: string; action: MenuAction } = r.canRevive
-      ? { label: "CONTINUE RUN", sub: "WATCH AN AD · KEEP YOUR SCORE", action: { kind: "revive" } }
-      : r.hasNext
-        ? { label: "NEXT MISSION", sub: (r.nextLabel ?? "").toUpperCase(), action: { kind: "next" } }
-        : { label: r.retryLabel.toUpperCase(), sub: "SPACE", action: { kind: "restart" } };
+    // The free action always carries the run forward, and it is always the one SPACE
+    // takes — a visual default that disagrees with the keyboard default is a trap.
+    const free: { label: string; sub: string; action: MenuAction } = r.hasNext
+      ? { label: "NEXT MISSION", sub: (r.nextLabel ?? "").toUpperCase(), action: { kind: "next" } }
+      : { label: r.retryLabel.toUpperCase(), sub: "SPACE", action: { kind: "restart" } };
 
-    this.regions.push({ x: w / 2 - primaryW / 2, y: primaryY, w: primaryW, h: primaryH, action: primary.action });
-    this.goldSlab(ctx, w / 2 - primaryW / 2, primaryY, primaryW, primaryH, k,
-      this.regionHovered(w / 2 - primaryW / 2, primaryY, primaryW, primaryH));
-    text(ctx, primary.label, w / 2, primaryY + primaryH / 2 + 2 * k, Math.min(34 * k, primaryW * 0.11),
-      "#141820", "center", "middle", 900);
-    if (primary.sub) {
-      text(ctx, primary.sub, w / 2, primaryY + primaryH + 16 * k, 11 * k,
+    if (r.canRevive) {
+      // A revive is *offered*, never promoted. The two actions are drawn the same
+      // size, side by side, and SPACE stays on the free one — a player mashing the
+      // retry key must never be the reason an ad starts. The revive keeps the gold
+      // only because it is the one that continues the run in progress; it gets no
+      // extra pixels, no head start and no keyboard default for it.
+      const gap = 12 * k;
+      const halfW = (primaryW - gap) / 2;
+      const leftX = w / 2 - primaryW / 2;
+      const rightX = leftX + halfW + gap;
+      const label = Math.min(22 * k, halfW * 0.13);
+
+      this.regions.push({ x: leftX, y: primaryY, w: halfW, h: primaryH, action: { kind: "revive" } });
+      this.goldSlab(ctx, leftX, primaryY, halfW, primaryH, k,
+        this.regionHovered(leftX, primaryY, halfW, primaryH));
+      text(ctx, "CONTINUE RUN", leftX + halfW / 2, primaryY + primaryH / 2 + 2 * k, label,
+        "#141820", "center", "middle", 900);
+      text(ctx, "WATCH AN AD", leftX + halfW / 2, primaryY + primaryH + 16 * k, 11 * k,
         "rgba(244,241,232,0.45)", "center", "middle", 800);
+
+      this.solidButton(ctx, rightX, primaryY, halfW, primaryH, k, free.label, label, free.action);
+      text(ctx, free.sub || "SPACE", rightX + halfW / 2, primaryY + primaryH + 16 * k, 11 * k,
+        "rgba(244,241,232,0.45)", "center", "middle", 800);
+    } else {
+      this.regions.push({ x: w / 2 - primaryW / 2, y: primaryY, w: primaryW, h: primaryH, action: free.action });
+      this.goldSlab(ctx, w / 2 - primaryW / 2, primaryY, primaryW, primaryH, k,
+        this.regionHovered(w / 2 - primaryW / 2, primaryY, primaryW, primaryH));
+      text(ctx, free.label, w / 2, primaryY + primaryH / 2 + 2 * k, Math.min(34 * k, primaryW * 0.11),
+        "#141820", "center", "middle", 900);
+      if (free.sub) {
+        text(ctx, free.sub, w / 2, primaryY + primaryH + 16 * k, 11 * k,
+          "rgba(244,241,232,0.45)", "center", "middle", 800);
+      }
     }
 
     // Secondaries live in the bottom corners, as far from the primary as the screen
@@ -1104,7 +1194,8 @@ export class Menu {
     const sh = 34 * k;
     const sy = h - sh - 16 * k;
     this.ghostButton(ctx, 16 * k, sy, sw, sh, k, "‹ MENU", { kind: "quit" });
-    if (r.canRevive || r.hasNext) {
+    // Only when RETRY is not already one of the two buttons above it.
+    if (r.hasNext && !r.canRevive) {
       this.ghostButton(ctx, w - sw - 16 * k, sy, sw, sh, k, r.retryLabel.toUpperCase(), { kind: "restart" });
     }
 
@@ -1161,6 +1252,29 @@ export class Menu {
     // chips rather than a table, because nobody reads four labelled rows twice.
     const room = primaryY - 26 * k - y;
     if (room > 34 * k) this.drawStatChips(ctx, w, y + 6 * k, k, r.stats, narrow);
+  }
+
+  /**
+   * A full-weight button that is not the gold slab.
+   *
+   * Exists so the result card can offer two actions at genuinely equal prominence —
+   * same footprint, same type size, same hit area — without either of them having to
+   * borrow the ghost treatment, which reads as "the lesser option".
+   */
+  private solidButton(
+    ctx: Ctx, x: number, y: number, w: number, h: number, k: number,
+    label: string, size: number, action: MenuAction,
+  ) {
+    const hot = this.regionHovered(x, y, w, h);
+    this.regions.push({ x, y, w, h, action });
+    ctx.fillStyle = hot ? "rgba(244,241,232,0.22)" : "rgba(244,241,232,0.12)";
+    roundRect(ctx, x, y, w, h, 16 * k);
+    ctx.fill();
+    ctx.strokeStyle = hot ? CREAM : "rgba(244,241,232,0.55)";
+    ctx.lineWidth = 2.5 * k;
+    roundRect(ctx, x, y, w, h, 16 * k);
+    ctx.stroke();
+    text(ctx, label, x + w / 2, y + h / 2 + 2 * k, size, CREAM, "center", "middle", 900);
   }
 
   private ghostButton(
@@ -1380,6 +1494,69 @@ const THUMB_W = 420;
 const THUMB_H = 240;
 const thumbCache = new Map<string, HTMLCanvasElement>();
 
+/**
+ * The card for a world built out of artwork: its own backdrop plates, its own ground
+ * tiles, its own building. Same framing as the generated cards so the row still reads
+ * as one set. Returns false if anything was still loading.
+ */
+function spriteThumb(
+  g: Ctx, def: LevelDef, sb: NonNullable<Theme["sprites"]>, horizon: number,
+): boolean {
+  const th = THEMES[def.theme];
+  let complete = true;
+
+  g.fillStyle = sb.sky;
+  g.fillRect(0, 0, THUMB_W, THUMB_H);
+
+  // Metres-per-pixel chosen so the card frames about the same slice of world the game
+  // does at rest — the card is a promise about what you are about to see.
+  const ppm = THUMB_H / 26;
+  g.save();
+  g.imageSmoothingEnabled = false;
+  for (const L of sb.layers) {
+    const s = sheet(L.path);
+    if (!s.ready) { complete = false; continue; }
+    const hpx = L.height * ppm;
+    const wpx = hpx * (s.w / s.h);
+    const y = horizon - L.lift * ppm - hpx;
+    for (let x = 0; x < THUMB_W; x += wpx) g.drawImage(s.img, x, y, wpx + 1, hpx);
+  }
+  g.restore();
+
+  g.fillStyle = th.ground;
+  g.fillRect(0, horizon, THUMB_W, THUMB_H - horizon);
+  g.fillStyle = th.groundTop;
+  g.fillRect(0, horizon, THUMB_W, 3);
+
+  const art = def.thumbArt;
+  if (art) {
+    const s = sheet(art.path);
+    if (!s.ready) complete = false;
+    else {
+      // Drawn through the same helper the world uses, so the card cannot drift from it.
+      // That helper works in a Y-up space, so the axis is flipped for this one call.
+      g.save();
+      g.translate(0, horizon);
+      g.scale(1, -1);
+      const scale = (horizon * 0.62) / art.th;
+      blitTiles(g as unknown as Ctx, s, art.tx, art.ty, art.tw, art.th, THUMB_W * 0.56, 0, scale);
+      g.restore();
+    }
+  }
+
+  // The one black stick figure, so the card says whose game this is.
+  g.fillStyle = "#12151c";
+  const px = THUMB_W * 0.26;
+  g.fillRect(px - 2, horizon - 26, 4, 15);
+  g.beginPath();
+  g.arc(px, horizon - 30, 5, 0, TAU);
+  g.fill();
+  g.fillRect(px - 7, horizon - 11, 4, 11);
+  g.fillRect(px + 3, horizon - 11, 4, 11);
+
+  return complete;
+}
+
 /** Which skyline sketch a level gets. Campaign missions inherit theirs from the theme. */
 function sketchFor(def: LevelDef): "castle" | "alien" | "mars" | "city" {
   if (def.theme === "night") return "castle";
@@ -1404,6 +1581,14 @@ function thumbnail(def: LevelDef): HTMLCanvasElement {
   const g = c.getContext("2d")!;
   const th = THEMES[def.theme] ?? THEMES.day;
   const horizon = THUMB_H * 0.74;
+
+  if (th.sprites) {
+    const done = spriteThumb(g, def, th.sprites, horizon);
+    // Only keep the bake once every sheet it needs has decoded. Boot waits for them, so
+    // this is belt and braces — but a card cached half-drawn would stay half-drawn.
+    if (done) thumbCache.set(def.id, c);
+    return c;
+  }
 
   const sky = g.createLinearGradient(0, 0, 0, THUMB_H);
   sky.addColorStop(0, th.sky[0]);

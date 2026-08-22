@@ -2,11 +2,13 @@ import { iconBitmap } from "../render/props";
 import { clamp, damp, lerp, TAU } from "../core/math";
 import { rgba, type Ctx } from "../render/draw";
 import type { Weapon } from "../weapons/weapon";
+import { keyLabel } from "../core/keylabel";
 
 export interface HudState {
   hp: number;
   maxHp: number;
   /** Jetpack tank, 0..1. */
+  /** Jetpack charge 0..1, or -1 when the player has no pack yet and there is no gauge. */
   fuel: number;
   /** Jetpack throttle, 0..1 — makes the gauge glow while burning. */
   jetThrottle: number;
@@ -154,7 +156,10 @@ export class Hud {
     const y = 20 * k;
     const bw = (narrow ? 150 : 220) * k;
     const barH = 16 * k;
-    const fuelH = 9 * k;
+    // Before the jetpack is earned there is no gauge and no space reserved for one.
+    // A permanently empty bar would read as a broken jetpack rather than as no jetpack.
+    const hasPack = s.fuel >= 0;
+    const fuelH = hasPack ? 9 * k : 0;
 
     const scoreSize = (narrow ? 32 : 40) * k;
     const scoreStr = s.displayScore.toLocaleString("en-US");
@@ -191,6 +196,7 @@ export class Hud {
       10 * k, INK, "left", "middle", 900);
 
     // Jetpack fuel, directly under health so the two read as one status block.
+    if (!hasPack) return;
     const fy = hy + barH + 4 * k;
     ctx.fillStyle = "rgba(0,0,0,0.5)";
     roundRect(ctx, x, fy, bw, fuelH, 4 * k);
@@ -442,9 +448,11 @@ export class Hud {
         "center", "middle", 900, "rgba(0,0,0,0.7)");
     } else if (!touch) {
       // The cells are not numbered, so the strip has to say how to walk it.
+      // Layout-aware: on AZERTY the key we bind as `Digit1` is printed "&", and a
+      // strip that insists on "1" sends that player hunting. See `core/keylabel`.
       const key = "rgba(244,241,232,0.42)";
-      text(ctx, "1 ‹", px0 - 10 * k, baseY + 1 * k, 14 * k, key, "right", "middle", 900);
-      text(ctx, "› 3", px0 + plateW + 10 * k, baseY + 1 * k, 14 * k, key, "left", "middle", 900);
+      text(ctx, `${keyLabel("Digit1")} ‹`, px0 - 10 * k, baseY + 1 * k, 14 * k, key, "right", "middle", 900);
+      text(ctx, `› ${keyLabel("Digit3")}`, px0 + plateW + 10 * k, baseY + 1 * k, 14 * k, key, "left", "middle", 900);
     }
   }
 

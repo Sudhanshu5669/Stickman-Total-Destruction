@@ -2,6 +2,7 @@ import { clamp, pick, rand, type V } from "../core/math";
 import { impactBank, tierDuration, type ImpactId, type Tier } from "./audio-dsp";
 import { Mixer, type Cat, type Slot } from "./audio-mix";
 import { Music, type Mood } from "./audio-music";
+import { settings } from "../ui/settings";
 
 /**
  * Everything is synthesised at runtime — no audio files, so the whole game stays a
@@ -84,8 +85,17 @@ export class Sfx {
   private music: Music | null = null;
   private noiseBuf!: AudioBuffer;
 
-  muted = false;
-  volume = 0.75;
+  /**
+   * Both of these are mirrors of the persisted settings, read once here rather than
+   * looked up on the hot path — `gain` is consulted on every voice grant.
+   */
+  muted = settings.muted;
+  /**
+   * Master gain. The mix was tuned at 0.75, and the volume control scales that rather
+   * than replacing it, so the top stop is the level everything was balanced against
+   * and no setting can drive the limiter past it.
+   */
+  volume = 0.75 * settings.volume;
   /** Music sits well under the effects: it is the bed, not the event. */
   musicVolume = 0.34;
 
@@ -148,8 +158,15 @@ export class Sfx {
     this.mix?.setVolume(this.gain);
   }
 
+  /** Applies a `VOLUME_STEPS` index the player just chose, and remembers it. */
+  setVolumeStep(i: number) {
+    settings.setVolumeStep(i);
+    this.setVolume(0.75 * settings.volume);
+  }
+
   toggleMute() {
     this.muted = !this.muted;
+    settings.setMuted(this.muted);
     this.mix?.setVolume(this.gain);
     // Muted music keeps its clock but stops allocating nodes — unmuting drops you back
     // into the arrangement where it would have been rather than restarting it.
@@ -478,34 +495,39 @@ export class Sfx {
   }
 
   /**
-   * A chain milestone. `n` is the chain length, and each tier lands a fourth higher, so
-   * the reward reads as a ladder even when you cannot see the popup.
+   * A chain milestone.
+   *
+   * This used to be a three-note arpeggio a fourth higher per tier. It is now a rising
+   * filtered-noise rush and nothing tonal: chains fire constantly during a good run,
+   * and a chime on every one of them turned the best moments in the game into a
+   * doorbell. The tier still reads — the sweep gets louder, longer and brighter with
+   * each rung, and the duck plus the excitement bump do the rest.
    */
   combo(n: number, at?: V | null) {
     const tier = n >= 100 ? 3 : n >= 50 ? 2 : n >= 25 ? 1 : 0;
     const s = this.grab("ui", "combo", 0.5 + tier * 0.1, 0.75, at, 2.4);
     if (!s) return;
-    const root = [392, 523.25, 698.46, 932.33][tier];
-    for (let i = 0; i < 3; i++) {
-      this.tone(s, {
-        freq: root * Math.pow(2, i / 3), dur: 0.3 - i * 0.05,
-        gain: 0.16 + tier * 0.03, type: i === 2 ? "square" : "triangle", delay: i * 0.055,
-      });
-    }
-    this.noise(s, { dur: 0.3, gain: 0.06 + tier * 0.02, freq: 900, sweepTo: 7000, q: 1.4, type: "bandpass", attack: 0.05 });
+    this.noise(s, {
+      dur: 0.3 + tier * 0.05, gain: 0.1 + tier * 0.035,
+      freq: 700 + tier * 120, sweepTo: 6500 + tier * 900,
+      q: 1.4, type: "bandpass", attack: 0.05,
+    });
     this.mix!.duckAll(0.2 + tier * 0.06, 0.06);
     this.excite(0.12 + tier * 0.1);
   }
 
-  /** Something new in the arsenal. The one sound that should stop a player mid-swing. */
+  /**
+   * Something new in the arsenal. The one sound that should stop a player mid-swing.
+   *
+   * The five-note bell arpeggio that used to carry this is gone. What is left is the
+   * swell — a long noise sweep under a deep duck — and the music's own reward stinger,
+   * which is the part that was actually saying "look at this" anyway. The swell is
+   * louder than it was to cover the space the chimes used to occupy.
+   */
   reward() {
     const s = this.grab("ui", "reward", 0.75, 1.5, null, 3);
     if (!s) return;
-    [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => {
-      this.tone(s, { freq: f, dur: 0.5 - i * 0.05, gain: 0.15, type: "triangle", delay: i * 0.08 });
-      this.tone(s, { freq: f * 2, dur: 0.2, gain: 0.05, type: "sine", delay: i * 0.08 });
-    });
-    this.noise(s, { dur: 0.9, gain: 0.07, freq: 2000, sweepTo: 9000, q: 1.2, type: "bandpass", attack: 0.2 });
+    this.noise(s, { dur: 1.1, gain: 0.13, freq: 1600, sweepTo: 9000, q: 1.2, type: "bandpass", attack: 0.28 });
     this.mix!.duckAll(0.45, 0.5);
     this.music?.stinger("reward");
   }

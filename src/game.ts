@@ -21,11 +21,14 @@ import { TouchControls } from "./ui/touch";
 import { Coach, type CoachInput } from "./ui/coach";
 import { settings } from "./ui/settings";
 import { portal } from "./platform/portal";
+import { primeKeyLabels } from "./core/keylabel";
+import { Story } from "./ui/story";
+import { preload } from "./render/sprites";
 import { fromEnergy, hit as juiceHit, kill as juiceKill, resetJuice } from "./fx/juice";
 import type { ResultCard } from "./ui/menu";
 import { DemoDriver } from "./ai/demo";
 import { Builder } from "./levels/builder";
-import { CAMPAIGN, DAILY, LEVELS, levelById } from "./levels";
+import { CAMPAIGN, DAILY, LEVELS, LEVEL_ASSETS, levelById } from "./levels";
 import type { LevelDef, LevelInfo, LevelKind } from "./levels/types";
 import { clamp, damp, lerp, rand, v, type V } from "./core/math";
 import { Bullet } from "./entities/bullet";
@@ -41,7 +44,11 @@ const BASE_GRAVITY = -26;
 /** Attract mode reloads on this cadence so the demo never runs out of things to break. */
 const DEMO_RELOAD = 52;
 
-export type Mode = "menu" | "playing";
+/**
+ * `story` is the cutscene: no world simulated, no HUD, its own input handling. It sits
+ * between the menu and a level rather than inside either.
+ */
+export type Mode = "menu" | "playing" | "story";
 
 /** How a run ended. Drives the result overlay; null while it is still going. */
 export type Outcome = "won" | "lost" | null;
@@ -166,9 +173,19 @@ export class Game implements GameCtx {
     // that timeout before it even starts loading would be paying the portal's cost
     // everywhere except the portal.
     portal.loadingStart();
+    // Cosmetic and asynchronous: nothing below waits on it, and every label it feeds
+    // has a working fallback until it lands.
+    primeKeyLabels();
     const detected = portal.init();
+    // Tilesets download alongside the physics blob, which is several times their size,
+    // so in practice they cost nothing wall-clock. Awaited rather than fired and
+    // forgotten because `Builder.spriteWall` reads the artwork's own alpha to decide
+    // where to put rigid bodies — building a level before the sheet decodes would give
+    // it a solid rectangle where the roof should slope.
+    const art = preload(LEVEL_ASSETS);
     await Physics.load();
     await detected;
+    await art;
     this.enterMenu();
     portal.loadingStop();
     this.running = true;
@@ -285,8 +302,43 @@ export class Game implements GameCtx {
   /** Score already paid into carnage this run, so banking twice cannot double-charge. */
   private bankedScore = 0;
 
-  /** Starts a level for the player. */
+  /** The cutscene, while one is playing. Null the rest of the time. */
+  private story: Story | null = null;
+  /** The level the cutscene is a prologue to, started the moment it finishes. */
+  private storyNext: LevelDef | null = null;
+  /** Latched so a level's `onCleared` beat can only ever fire once. */
+  private clearedFired = false;
+
+  /**
+   * Starts a level, playing its intro first if it has one this player has not seen.
+   *
+   * The cutscene is checked here rather than at the menu so that every route into a
+   * contract — the PLAY button, the picker, a retry, a `nextMission` — gets the same
+   * answer, and so that `progress.contract` is the single thing deciding it.
+   */
   startLevel(def: LevelDef) {
+    if (def.intro && progress.contract < (def.order ?? 1)) {
+      this.beginStory(def);
+      return;
+    }
+    this.enterLevel(def);
+  }
+
+  /** Runs the prologue. The level is loaded underneath it so the cut is instant. */
+  private beginStory(def: LevelDef) {
+    this.bankRun();
+    this.mode = "story";
+    this.story = new Story();
+    this.storyNext = def;
+    this.paused = false;
+    this.outcome = null;
+    this.canvas.style.cursor = "default";
+    portal.gameplayStop();
+    sfx.setMood("menu");
+    this.input.consumeEdges();
+  }
+
+  private enterLevel(def: LevelDef) {
     this.bankRun();
     this.mode = "playing";
     this.runKind = def.kind ?? "playground";
@@ -304,7 +356,15 @@ export class Game implements GameCtx {
     this.lastScoreResult = null;
     this.reviveUsed = false;
     this.reviving = false;
+    this.clearedFired = false;
     this.loadLevel(def);
+    // Equipment, after the player exists.
+    //
+    // The pack is standard kit in every mode — the playgrounds and endless are built
+    // around flight and always were. Only a level that explicitly gates it goes
+    // without, and only until it has been earned: replaying the first contract after
+    // finishing it lets you fly, because taking a reward back is not a story beat.
+    this.player.hasJetpack = def.noJetpack ? progress.hasJetpack : true;
     this.coach.begin();
     portal.gameplayStart();
     this.player.control = null;
@@ -509,6 +569,13 @@ export class Game implements GameCtx {
     this.menu.lastMouse.x = this.input.mouse.x;
     this.menu.lastMouse.y = this.input.mouse.y;
 
+    if (this.mode === "story") {
+      this.updateStory(rawDt);
+      this.render(rawDt);
+      this.input.consumeEdges();
+      return;
+    }
+
     if (this.mode === "menu") {
       this.menu.update(rawDt);
       this.handleMenuInput();
@@ -640,8 +707,22 @@ export class Game implements GameCtx {
       this.winDelay = 0;
       return;
     }
+    // A level with a closing beat owns its own ending from here: the game stops
+    // counting down and waits to be told. See `LevelInfo.onCleared`.
+    if (this.level.onCleared) {
+      if (!this.clearedFired) {
+        this.clearedFired = true;
+        this.level.onCleared(this, () => this.finish("won"));
+      }
+      return;
+    }
+
     this.winDelay += dt;
     if (this.winDelay > 1.4) this.finish("won");
+  }
+
+  equipJetpack() {
+    this.player.hasJetpack = true;
   }
 
   private finish(outcome: Outcome) {
@@ -651,7 +732,11 @@ export class Game implements GameCtx {
     portal.gameplayStop();
 
     if (outcome === "won") {
-      if (this.runKind === "campaign") progress.clear(this.levelDef.order ?? 0);
+      // Contracts and the older campaign share run rules but not a progress counter:
+      // both are `kind: "campaign"` and both are order 1, so writing one from the other
+      // would have a finished contract unlocking mission 2 of a different list.
+      if (this.levelDef.intro) progress.finishContract(this.levelDef.order ?? 1);
+      else if (this.runKind === "campaign") progress.clear(this.levelDef.order ?? 0);
       sfx.levelUp();
       portal.happytime();
     } else {
@@ -988,7 +1073,7 @@ export class Game implements GameCtx {
     sfx.setAdPlaying(portal.adPlaying);
     const half = this.camera.visibleHalf();
     sfx.listener(this.camera.pos.x, this.camera.pos.y, half.x);
-    sfx.setMood(this.mode === "menu" ? "menu" : this.outcome ? "result" : "combat");
+    sfx.setMood(this.mode !== "playing" ? "menu" : this.outcome ? "result" : "combat");
   }
 
   // ------------------------------------------------------------------ input
@@ -997,9 +1082,16 @@ export class Game implements GameCtx {
   private handleFrameKeys() {
     // An ad owns the screen; the game must not react to anything behind it.
     if (portal.adPlaying) return;
-    const pause = this.input.pressed("KeyP", "Escape") || this.touch.pausePressed;
+    const pause = this.input.pressed("KeyP", "Backspace") || this.touch.pausePressed;
     this.touch.pausePressed = false;
     if (this.mode === "playing" && !this.outcome && pause) {
+      // Back out of the options panel first — it is drawn over the pause menu, and
+      // unpausing straight through it leaves the game running with the panel armed.
+      if (this.paused && this.menu.closeOptions()) {
+        sfx.ui(false);
+        this.input.consumeEdges();
+        return;
+      }
       this.paused = !this.paused;
       this.canvas.style.cursor = this.paused ? "default" : "none";
       if (this.paused) this.touch.release();
@@ -1012,6 +1104,37 @@ export class Game implements GameCtx {
       sfx.ui(!this.paused);
       this.input.consumeEdges();
     }
+  }
+
+  /**
+   * Runs the cutscene.
+   *
+   * Any confirm input advances it; the skip control and the pause key end it outright.
+   * Nothing here touches the world — the level is not loaded until the fade completes,
+   * so a long cutscene costs no simulation.
+   */
+  private updateStory(dt: number) {
+    const st = this.story;
+    if (!st) {
+      this.enterMenu();
+      return;
+    }
+    const clicked = this.input.mousePressed;
+    const skip = this.input.pressed("Backspace", "KeyP")
+      || (clicked && st.hitSkip(this.input.mouse.x, this.input.mouse.y));
+    if (skip) st.skip();
+
+    // A click that hit SKIP must not also advance the line underneath it.
+    const advance = !skip && (clicked || this.input.pressed("Enter", "NumpadEnter", "Space"));
+    st.update(dt, advance);
+
+    // Hold on black for the length of the fade, then cut into the level underneath.
+    if (!st.done || st.fade < 1) return;
+    const def = this.storyNext;
+    this.story = null;
+    this.storyNext = null;
+    if (def) this.enterLevel(def);
+    else this.enterMenu();
   }
 
   private handleMenuInput() {
@@ -1027,7 +1150,7 @@ export class Game implements GameCtx {
     } else if (this.input.pressed("Enter", "NumpadEnter", "Space")) {
       this.applyMenuAction(m.confirm());
       return;
-    } else if (this.input.pressed("Escape", "Backspace")) {
+    } else if (this.input.pressed("Backspace")) {
       if (m.back()) {
         sfx.ui(false);
         this.enterMenu();
@@ -1079,15 +1202,16 @@ export class Game implements GameCtx {
     if (this.reviving || portal.adPlaying) return;
 
     if (this.input.pressed("Enter", "NumpadEnter", "Space")) {
-      // One key, and it always does the most valuable thing available: take the
-      // revive if there is one, otherwise carry on. The retry has to be reachable
-      // without hunting for a button.
-      if (this.canRevive) void this.revive();
-      else if (this.resultCard().hasNext) this.nextMission();
+      // One key, and it always takes the *free* way forward — next mission if there
+      // is one, otherwise a retry. Deliberately never the revive: this is the key a
+      // player mashes on the death screen, and spending that reflex on an ad request
+      // they did not choose is the definition of a manipulated button. The revive is
+      // right beside it on screen, the same size, one click away.
+      if (this.resultCard().hasNext) this.nextMission();
       else this.restart();
       return;
     }
-    if (this.input.pressed("Escape")) {
+    if (this.input.pressed("Backspace")) {
       this.enterMenu();
       return;
     }
@@ -1163,7 +1287,7 @@ export class Game implements GameCtx {
   private handleSimKeys() {
     if (this.input.pressed("KeyM")) sfx.toggleMute();
     if (this.input.pressed("F3", "Backquote")) this.showDebug = !this.showDebug;
-    if (this.input.pressed("KeyR")) this.player.toggleRagdoll();
+    if (this.input.limpPressed()) this.player.toggleRagdoll();
     if (this.input.pressed("KeyG")) this.toggleGod();
     // Reset last: it replaces `this.player`, so nothing after it may touch the old one.
     if (this.input.pressed("KeyF")) this.restart();
@@ -1190,6 +1314,12 @@ export class Game implements GameCtx {
     const h = this.canvas.clientHeight;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // The cutscene is the whole frame: no world, no HUD, no crosshair.
+    if (this.mode === "story" && this.story) {
+      this.story.draw(ctx, w, h);
+      return;
+    }
 
     // Resample the aim against the camera we are about to draw with.
     //

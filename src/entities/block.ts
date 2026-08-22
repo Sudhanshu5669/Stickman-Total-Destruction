@@ -3,6 +3,7 @@ import type { Actor, GameCtx } from "../core/types";
 import { clamp, hash01, rand, randSign, TAU, v, type V } from "../core/math";
 import { at, rgba, roundBox, shade, type Ctx } from "../render/draw";
 import { sfx } from "../fx/audio";
+import { blit, PPM, type Sheet } from "../render/sprites";
 
 export type MaterialId =
   | "wood" | "brick" | "concrete" | "glass" | "metal" | "ice" | "explosive" | "gold"
@@ -97,6 +98,27 @@ export const MATERIALS: Record<MaterialId, Material> = {
   },
 };
 
+/**
+ * A window onto a sprite sheet, painted over a block's face instead of its material.
+ *
+ * This is what lets a bought tileset stay destructible. Lay a grid of one-metre blocks
+ * over a house sprite, give each block the cell of artwork it happens to sit under, and
+ * the house reads as the artist drew it while remaining what it always was — a stack of
+ * independent rigid bodies. Shoot the porch out and the porch is what falls, still
+ * carrying its own pixels, tumbling and lit by the same damage and burn overlays as
+ * every other block in the game.
+ *
+ * Source coordinates are in **pixels**, so a skin can point at any sub-rectangle rather
+ * than only at grid cells.
+ */
+export interface BlockSkin {
+  sheet: Sheet;
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+}
+
 export interface BlockOptions {
   x: number;
   y: number;
@@ -109,6 +131,8 @@ export interface BlockOptions {
    * anything disturbs them. Default true — see the note on `Block`.
    */
   anchored?: boolean;
+  /** Pixel-art face. Replaces the material's own fill; every overlay still applies. */
+  skin?: BlockSkin;
 }
 
 /**
@@ -135,6 +159,8 @@ export class Block implements Actor, PhysOwner {
   readonly h: number;
   anchored: boolean;
   readonly seed = Math.random() * 997;
+  /** Pixel-art face, if this block was built from a tileset. */
+  readonly skin: BlockSkin | null;
 
   hp: number;
   maxHp: number;
@@ -169,6 +195,7 @@ export class Block implements Actor, PhysOwner {
     this.w = o.w;
     this.h = o.h;
     this.anchored = o.anchored ?? true;
+    this.skin = o.skin ?? null;
     this.maxHp = this.hp = Math.max(6, this.mat.toughness * o.w * o.h);
 
     const desc = (this.anchored ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic())
@@ -365,7 +392,23 @@ export class Block implements Actor, PhysOwner {
         ? shade(m.color, -0.62 * this.burning)
         : this.soaked > 0.05 ? shade(m.color, -0.18 * clamp(this.soaked, 0, 1)) : m.color;
       const base = translucent ? rgba(tinted, m.id === "crystal" ? 0.68 : 0.55) : tinted;
-      roundBox(ctx, this.w, this.h, Math.min(0.06, this.w * 0.2), base, shade(m.color, -0.4), 0.045);
+      const skin = this.skin;
+      // A skinned block paints its slice of the tileset in place of the material face.
+      // The sheet may still be decoding on the first frames of a level, so the material
+      // fill stays the fallback rather than the block flickering out of existence.
+      if (skin && skin.sheet.ready) {
+        // Bled outward by half a source pixel on each side. Neighbouring blocks settle a
+        // few millimetres apart under the solver, and at high zoom that gap shows as a
+        // seam of background straight through a solid wall.
+        const bleed = 0.5 / PPM;
+        blit(
+          ctx, skin.sheet, skin.sx, skin.sy, skin.sw, skin.sh,
+          -this.w / 2 - bleed, this.h / 2 + bleed,
+          this.w + bleed * 2, this.h + bleed * 2,
+        );
+      } else {
+        roundBox(ctx, this.w, this.h, Math.min(0.06, this.w * 0.2), base, shade(m.color, -0.4), 0.045);
+      }
 
       // Embers crawling over the charred face.
       if (this.burning > 0.01) {
@@ -381,11 +424,14 @@ export class Block implements Actor, PhysOwner {
         }
       }
 
-      // Top highlight gives the flat blocks a readable light direction.
-      ctx.fillStyle = rgba("#ffffff", translucent ? 0.22 : 0.13);
-      ctx.fillRect(-this.w / 2 + 0.03, this.h / 2 - Math.min(0.09, this.h * 0.22), this.w - 0.06, Math.min(0.07, this.h * 0.18));
+      // Top highlight gives the flat blocks a readable light direction. Skinned blocks
+      // already have light baked into the art, and a second highlight fights it.
+      if (!skin) {
+        ctx.fillStyle = rgba("#ffffff", translucent ? 0.22 : 0.13);
+        ctx.fillRect(-this.w / 2 + 0.03, this.h / 2 - Math.min(0.09, this.h * 0.22), this.w - 0.06, Math.min(0.07, this.h * 0.18));
+      }
 
-      switch (m.id) {
+      switch (skin ? "skinned" : m.id) {
         case "brick":
         case "sandstone":
           this.drawBrickCourses(ctx);
@@ -558,11 +604,29 @@ export class Block implements Actor, PhysOwner {
 }
 
 /** Immovable world geometry: ground slabs, cliffs, platforms. */
+/**
+ * A nine-slice ground surface, named by the top-left cell of its 3x3 block.
+ *
+ * Only the top row and the fill are ever used — the ground runs off both ends of the
+ * world, so it has no left, right or bottom to cap.
+ */
+export interface TerrainSkin {
+  sheet: Sheet;
+  tx: number;
+  ty: number;
+}
+
 export class Terrain implements Actor, PhysOwner {
   readonly kind = "terrain" as const;
   dead = false;
   z = 0;
   body: RAPIER.RigidBody;
+  /**
+   * Tiled face. Set by the builder after construction rather than passed in: the
+   * constructor is already six positional colour arguments deep, and every other level
+   * in the game wants none of this.
+   */
+  skin: TerrainSkin | null = null;
 
   constructor(
     private readonly game: GameCtx,
@@ -591,6 +655,10 @@ export class Terrain implements Actor, PhysOwner {
   draw(ctx: Ctx) {
     const x = this.x - this.w / 2;
     const y = this.y - this.h / 2;
+    if (this.skin?.sheet.ready) {
+      this.drawTiled(ctx, x, y);
+      return;
+    }
     ctx.fillStyle = this.color;
     ctx.fillRect(x, y, this.w, this.h);
 
@@ -633,6 +701,50 @@ export class Terrain implements Actor, PhysOwner {
       ctx.moveTo(gx, top);
       ctx.lineTo(gx + (h - 0.5) * 0.3, top + 0.16 + h * 0.16);
       ctx.stroke();
+    }
+  }
+
+  /**
+   * Paints the slab as one-metre tiles.
+   *
+   * Only the columns inside the camera's span are emitted — the same trick the grass
+   * tufts use — which is what makes this affordable on a slab that can be four hundred
+   * metres wide. A visible span is ~60 columns, so the whole surface costs a few
+   * hundred blits however long the level is.
+   *
+   * The subsoil repeats rather than stretching. Stretching one tile over five metres
+   * was the cheaper option and it looked it: the pack's dirt tile carries a fine grain
+   * that smears into a flat brown slab the moment it is scaled, and a flat brown slab
+   * is a third of the frame whenever the camera is low.
+   *
+   * The flat `color` still goes down first. Tiles are one metre and the slab is six,
+   * so nothing is left uncovered, but a fill underneath means any rounding at the edges
+   * shows soil rather than sky.
+   */
+  private drawTiled(ctx: Ctx, x: number, y: number) {
+    const sk = this.skin!;
+    const top = y + this.h;
+    ctx.fillStyle = this.color;
+    ctx.fillRect(x, y, this.w, this.h);
+
+    const half = this.game.camera.visibleHalf(3);
+    const from = Math.max(x, Math.floor(this.game.camera.pos.x - half.x));
+    const to = Math.min(x + this.w, Math.ceil(this.game.camera.pos.x + half.x));
+    if (to <= from) return;
+
+    const surface = (sk.ty + 0) * PPM;
+    const fill = (sk.ty + 1) * PPM;
+    const mid = (sk.tx + 1) * PPM;
+    const bodyH = this.h - 1;
+
+    for (let gx = Math.floor(from); gx < to; gx++) {
+      // Surface row: grass on top, its own metre tall, sitting flush with the slab top.
+      blit(ctx, sk.sheet, mid, surface, PPM, PPM, gx, top, 1, 1);
+      // Subsoil, a metre at a time, with the last row short if the slab is not whole.
+      for (let d = 0; d < bodyH; d++) {
+        const rowH = Math.min(1, bodyH - d);
+        blit(ctx, sk.sheet, mid, fill, PPM, PPM * rowH, gx, top - 1 - d, 1, rowH);
+      }
     }
   }
 

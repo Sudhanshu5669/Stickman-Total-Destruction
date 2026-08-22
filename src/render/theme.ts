@@ -21,6 +21,36 @@
  * from whatever it sits against. That is what makes a black stickman read instantly,
  * and what makes the frame survive being shrunk to a 200px thumbnail.
  */
+/**
+ * One image layer of a painted backdrop.
+ *
+ * `depth` is the scroll rate (1.0 would be locked to the world), `height` is how many
+ * metres tall to draw the sheet, and `lift` raises its bottom edge off the horizon —
+ * negative sinks it, which is how a layer's solid base band gets hidden behind the
+ * terrain instead of stranded above it.
+ */
+export interface BackdropLayer {
+  path: string;
+  depth: number;
+  height: number;
+  lift: number;
+  alpha?: number;
+}
+
+/**
+ * A backdrop made of artwork rather than of code.
+ *
+ * The procedural path — baked strips, generated skylines, sine ridges — stays the
+ * default and stays untouched; a theme that sets this opts out of all of it in favour
+ * of parallaxed image layers. Only the world built on a bought tileset uses it.
+ */
+export interface SpriteBackdrop {
+  /** Layers far to near. Drawn in array order. */
+  layers: BackdropLayer[];
+  /** Flat colour behind the furthest layer, for viewports taller than the art. */
+  sky: string;
+}
+
 export interface Theme {
   id: string;
   /** Sky gradient stops, top to bottom, at 0 / 0.42 / 0.78 / 1. */
@@ -74,7 +104,12 @@ export interface Theme {
   ambientAlpha?: number;
   /** Whether terrain sprouts tufts along its top edge. Dead worlds shouldn't. */
   vegetation: boolean;
+  /** Painted backdrop. When set, it replaces sky, clouds, skyline and ridges entirely. */
+  sprites?: SpriteBackdrop;
 }
+
+/** Where the platformer pack's parallax layers live, so the paths appear once. */
+const BG = "GandalfHardcore FREE Platformer Assets/GandalfHardcore Background layers/Normal BG";
 
 export const THEMES: Record<string, Theme> = {
   /**
@@ -242,5 +277,78 @@ export const THEMES: Record<string, Theme> = {
     ambientAlpha: 0.08,
     // Nothing grows on Mars.
     vegetation: false,
+  },
+
+  /**
+   * Hollowbrook — the one world drawn by a person instead of by this file.
+   *
+   * Every other theme here is a palette the renderer turns into art. This one is art,
+   * and the palette exists only to serve the parts of the frame the artwork does not
+   * cover: the soil under a crater, the haze, the tint. So the values are sampled
+   * straight from the tileset rather than composed — the point is that nothing the
+   * engine draws underneath can be told apart from what the pack draws on top.
+   *
+   * The procedural sky, clouds, skyline and ridges are all switched off. Five painted
+   * layers replace them, and `skyline: "none"` keeps the backdrop baker from generating
+   * a silhouette strip that would never be blitted.
+   */
+  grove: {
+    id: "grove",
+    // Sampled off the pack's own sky layer, so the flat fill above the art matches it.
+    sky: ["#7ec4d2", "#a5dbe4", "#c6ebef", "#dcf2f2"],
+    horizonGlow: "220,244,240",
+    horizonGlowAlpha: 0.2,
+    hillFar: "#7c8a5a",
+    hillMid: "#5c6f42",
+    hillNear: "#3f5730",
+    skyline: "none",
+    skylineColor: "#3f5730",
+    skylineFar: "#7c8a5a",
+    windowColor: "rgba(255,206,120,0.85)",
+    cloudColor: "255,255,255",
+    cloudAlpha: 0,
+    cloudCount: 0,
+    sun: null,
+    moon: null,
+    stars: 0,
+    starColor: "#ffffff",
+    haze: "198,232,228",
+    // Dirt and grass lifted from Floor Tiles1, so a hole blown in the tiled surface
+    // exposes exactly the colours the tiles themselves are drawn in.
+    ground: "#2b1f16",
+    groundTop: "#6ab04a",
+    rock: "#6d6257",
+    rockTop: "#9a8d7c",
+    underground: "#150e09",
+    foreground: "#1d2a16",
+    foregroundKind: "grass",
+    ambient: "#ffe6b0",
+    ambientAlpha: 0.05,
+    vegetation: false,
+    /**
+     * The six plates are one picture the artist sliced, not six independent bands: they
+     * are drawn at an identical size and anchor, and *only* the scroll rate differs.
+     * Sizing them individually — which is the obvious thing to try — pushes each plate's
+     * horizon to a different height and the distance falls apart into stacked stickers.
+     *
+     * 15 metres is the number the composition turns on. It puts the near treeline's
+     * crown at roughly 11m and its opaque base a metre below the ground line, so the
+     * pines top out inside the frame at resting zoom with sky above them, and the band
+     * of solid green under them is hidden by the terrain instead of stranded over it.
+     * The sky plate alone is drawn taller, since it is a gradient with no horizon of its
+     * own to misplace and it has to keep covering as the jetpack climbs.
+     */
+    sprites: {
+      // The sky plate's own top colour, so the fill above it is not a visible seam.
+      sky: "#8ecdd8",
+      layers: [
+        { path: `${BG}/GandalfHardcore Background layers_layer 5.png`, depth: 0.02, height: 34, lift: -1 },
+        { path: `${BG}/Background Castle .png`, depth: 0.05, height: 15, lift: -1 },
+        { path: `${BG}/GandalfHardcore Background layers_layer 4.png`, depth: 0.10, height: 15, lift: -1 },
+        { path: `${BG}/GandalfHardcore Background layers_layer 3.png`, depth: 0.17, height: 15, lift: -1 },
+        { path: `${BG}/GandalfHardcore Background layers_layer 2.png`, depth: 0.27, height: 15, lift: -1 },
+        { path: `${BG}/GandalfHardcore Background layers_layer 1.png`, depth: 0.42, height: 15, lift: -1 },
+      ],
+    },
   },
 };

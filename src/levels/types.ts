@@ -15,6 +15,16 @@ export interface LevelInfo {
    * has gone and the game can tell it about kills.
    */
   director?: { distance: number; kills: number; countKill(): void };
+
+  /**
+   * Called once, on the frame the last hostile drops.
+   *
+   * Its presence hands completion to the level: the game stops running its own win
+   * timer and waits for `complete()`. That is what lets a contract put a beat between
+   * the last kill and the results card — a reward to walk to, a building to watch fall
+   * — instead of cutting to a card the instant the map goes quiet.
+   */
+  onCleared?(game: GameCtx, complete: () => void): void;
 }
 
 /** Which of the three front-end modes a level belongs to. */
@@ -35,6 +45,17 @@ export interface LevelDef {
   /** Menu card accent colour. */
   accent: string;
   build(game: GameCtx, b: Builder): LevelInfo;
+  /**
+   * Sprite sheets, by path under `src/Assets`, that must be decoded before `build`
+   * runs. Only the tileset world sets this; boot preloads the union across all levels
+   * and never blocks on a failure.
+   */
+  assets?: readonly string[];
+  /**
+   * A building to sketch on this level's menu card, for worlds whose look lives in a
+   * tileset rather than in their theme's palette. Source rect in tiles.
+   */
+  thumbArt?: { path: string; tx: number; ty: number; tw: number; th: number };
   /** Optional persistent world hazard, e.g. acid rain. */
   hazard?(game: GameCtx): Actor;
 
@@ -52,4 +73,11 @@ export interface LevelDef {
   briefing?: string;
   /** Campaign: display order, 1-based. */
   order?: number;
+  /**
+   * Takes the jetpack away for this level. Story equipment is only meaningful if
+   * something is built around not having it — see `CONTRACT_1`.
+   */
+  noJetpack?: boolean;
+  /** Cutscene to play before the first attempt. Only ever shown once; always skippable. */
+  intro?: "awakening";
 }

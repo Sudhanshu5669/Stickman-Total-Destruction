@@ -1,6 +1,7 @@
 import type { Camera } from "../core/camera";
 import { clamp, TAU, v, type V } from "../core/math";
 import type { Ctx } from "../render/draw";
+import { keyLabel } from "../core/keylabel";
 import { settings } from "./settings";
 
 /**
@@ -51,7 +52,7 @@ export interface CoachInput {
 }
 
 /** Which picture a lesson leads with. Drawn, not written — see `drawGlyph`. */
-type Glyph = "click" | "tap" | "keys-ad" | "drag" | "keys-13" | "swap-buttons" | "space" | "stick-up" | "key-r";
+type Glyph = "click" | "tap" | "keys-ad" | "drag" | "keys-13" | "swap-buttons" | "space" | "stick-up" | "key-r" | "limp-button";
 
 interface Lesson {
   id: LessonId;
@@ -122,7 +123,7 @@ const LESSONS: Lesson[] = [
     id: "limp",
     verb: "GO LIMP",
     keys: "key-r",
-    thumbs: null,
+    thumbs: "limp-button",
     delay: 12,
     patience: 14,
     ready: () => true,
@@ -402,14 +403,17 @@ function drawGlyph(ctx: Ctx, glyph: Glyph, cx: number, cy: number, size: number,
       ctx.fill();
       break;
     }
+    // The letters come from the player's own layout, not from the QWERTY name of the
+    // code — an AZERTY keyboard has no A where we bind `KeyA`, and drawing one there
+    // sends them hunting for a key that does nothing. See `core/keylabel`.
     case "keys-ad": {
-      keycap(ctx, -size * 0.24, 0, size * 0.4, k, "A", beat > 0.5);
-      keycap(ctx, size * 0.24, 0, size * 0.4, k, "D", beat <= 0.5);
+      keycap(ctx, -size * 0.24, 0, size * 0.4, k, keyLabel("KeyA"), beat > 0.5);
+      keycap(ctx, size * 0.24, 0, size * 0.4, k, keyLabel("KeyD"), beat <= 0.5);
       break;
     }
     case "keys-13": {
-      keycap(ctx, -size * 0.24, 0, size * 0.4, k, "1", beat > 0.5);
-      keycap(ctx, size * 0.24, 0, size * 0.4, k, "3", beat <= 0.5);
+      keycap(ctx, -size * 0.24, 0, size * 0.4, k, keyLabel("Digit1"), beat > 0.5);
+      keycap(ctx, size * 0.24, 0, size * 0.4, k, keyLabel("Digit3"), beat <= 0.5);
       break;
     }
     case "swap-buttons": {
@@ -418,7 +422,41 @@ function drawGlyph(ctx: Ctx, glyph: Glyph, cx: number, cy: number, size: number,
       break;
     }
     case "key-r": {
-      keycap(ctx, 0, 0, size * 0.44, k, "R", beat > 0.5);
+      keycap(ctx, 0, 0, size * 0.44, k, keyLabel("KeyR"), beat > 0.5);
+      break;
+    }
+    // The on-screen twin of `key-r`: the same falling figure the button itself draws,
+    // so the prompt and the thing it points at are recognisably one control.
+    case "limp-button": {
+      const bw = size * 0.5;
+      ctx.strokeStyle = `rgba(244,241,232,${0.3 + beat * 0.5})`;
+      ctx.lineWidth = 1.6 * k;
+      ctx.beginPath();
+      ctx.roundRect(-bw / 2, -bw / 2, bw, bw, bw * 0.24);
+      ctx.stroke();
+
+      const r = bw * 0.3;
+      ctx.save();
+      ctx.rotate(1.35);
+      ctx.strokeStyle = `rgba(255,210,63,${0.6 + beat * 0.4})`;
+      ctx.lineWidth = Math.max(1.8, bw * 0.055);
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.arc(0, -r * 0.78, r * 0.26, 0, TAU);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, -r * 0.5);
+      ctx.lineTo(0, r * 0.34);
+      ctx.moveTo(0, -r * 0.24);
+      ctx.lineTo(-r * 0.56, r * 0.1);
+      ctx.moveTo(0, -r * 0.24);
+      ctx.lineTo(r * 0.5, r * 0.2);
+      ctx.moveTo(0, r * 0.34);
+      ctx.lineTo(-r * 0.42, r * 0.82);
+      ctx.moveTo(0, r * 0.34);
+      ctx.lineTo(r * 0.46, r * 0.78);
+      ctx.stroke();
+      ctx.restore();
       break;
     }
     case "space": {

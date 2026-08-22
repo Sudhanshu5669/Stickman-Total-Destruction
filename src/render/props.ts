@@ -301,6 +301,43 @@ export const drawBarrel: PropDraw = (ctx, w, h) => {
 };
 
 /**
+ * The frag grenade — the only round the contractor starts with.
+ *
+ * Drawn with a lit fuse rather than a plain shell so a live grenade on the ground is
+ * legible at a glance: it is the one projectile in the game that is dangerous *after*
+ * it lands, and the player has to be able to tell it apart from debris while deciding
+ * whether to be somewhere else.
+ */
+export const drawGrenade: PropDraw = (ctx, w, h, t) => {
+  const r = Math.min(w, h) * 0.5;
+  // Body: olive, with a lighter band where the light catches it.
+  ctx.fillStyle = "#4a5a32";
+  ctx.beginPath();
+  ctx.arc(0, 0, r, 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = "#252e18";
+  ctx.lineWidth = r * 0.16;
+  ctx.stroke();
+  ctx.strokeStyle = "#6d8046";
+  ctx.lineWidth = r * 0.14;
+  ctx.beginPath();
+  ctx.arc(0, 0, r * 0.52, -2.3, -0.5);
+  ctx.stroke();
+
+  // Spoon and neck.
+  ctx.fillStyle = "#8c8f96";
+  ctx.fillRect(-r * 0.28, r * 0.72, r * 0.56, r * 0.5);
+  ctx.fillRect(r * 0.16, r * 0.6, r * 0.22, r * 0.9);
+
+  // Spark, on a fast flicker so it reads as burning rather than as a highlight.
+  const flick = 0.45 + 0.55 * Math.abs(Math.sin(t * 26));
+  ctx.fillStyle = flick > 0.75 ? "#fff0b8" : "#ff8a2c";
+  ctx.beginPath();
+  ctx.arc(r * 0.05, r * 1.5, r * 0.34 * flick, 0, TAU);
+  ctx.fill();
+};
+
+/**
  * Rasterised ammo glyphs for the HUD.
  *
  * The wheel shows every round at once, and re-running every full vector drawing
@@ -430,6 +467,9 @@ export function drawIcon(ctx: Ctx, id: string, size: number, t: number) {
     case "nuke": drawNuke(ctx, 0.45, 0.9, t); break;
     case "blackhole": drawBlackhole(ctx, 0.9, 0.9, t); break;
     case "barrel": drawBarrel(ctx, 0.55, 0.85, t); break;
+    // Drawn a little under size so the lit fuse has room inside the icon's box —
+    // the fuse is the whole read at 40 pixels, not the shell.
+    case "grenade": drawGrenade(ctx, 0.62, 0.62, t); break;
     case "water": {
       // A jet arcing out of a nozzle, with the droplets it breaks into.
       ctx.strokeStyle = "#4fc3f7";

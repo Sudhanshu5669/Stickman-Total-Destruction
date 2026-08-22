@@ -1,4 +1,6 @@
-import { Block, Terrain, type MaterialId } from "../entities/block";
+import { Block, Terrain, type MaterialId, type TerrainSkin } from "../entities/block";
+import { SpriteProp, type SpritePropOptions } from "../entities/spriteprop";
+import { PPM, sheet, type Sheet } from "../render/sprites";
 import { Enemy, combat, type CombatOptions, type CombatSpec, type EnemyKind } from "../entities/enemy";
 import type { Actor, GameCtx } from "../core/types";
 import { chance, pick, rand } from "../core/math";
@@ -59,6 +61,93 @@ export class Builder {
   }
 
   /** Solid rock ledge — reads as terrain rather than something you can knock over. */
+  // ------------------------------------------------------------- pixel art
+  /**
+   * Loads a sheet by its path under `src/Assets`. Sheets are cached, so calling this
+   * once per prop in a level costs one map lookup after the first.
+   */
+  sheet(path: string): Sheet {
+    return sheet(path);
+  }
+
+  /** A piece of scenery. No body, no collision — see `SpriteProp`. */
+  prop(o: SpritePropOptions) {
+    return this.track(this.game.add(new SpriteProp(this.game, o)));
+  }
+
+  /** Gives a ground slab a tiled surface. Returns the slab, so it chains off `ground`. */
+  skin(t: Terrain, s: TerrainSkin) {
+    t.skin = s;
+    return t;
+  }
+
+  /**
+   * Builds a structure directly out of its own artwork.
+   *
+   * Lays a `cols x rows` grid of one-metre blocks over the sheet region starting at
+   * tile (tx, ty), skins each block with the cell it covers, and **skips every cell the
+   * artwork leaves empty** — so a gabled roof comes out gabled, with no invisible boxes
+   * hanging off its slopes, without anyone writing down which tiles those are.
+   *
+   * The result is an ordinary stack of blocks: it takes damage, catches fire, topples
+   * and shatters exactly like a hand-built tower, and each piece falls carrying its own
+   * square of the picture.
+   *
+   * Note this reads pixels, so it needs the sheet decoded — levels using it must be
+   * behind `preload`. If the sheet is missing, every cell is treated as solid, which
+   * degrades to a plain rectangular building rather than to nothing.
+   */
+  spriteWall(o: {
+    sheet: Sheet;
+    /** Top-left source cell, in tiles. */
+    tx: number; ty: number;
+    cols: number; rows: number;
+    /** World position of the structure's bottom-left corner. */
+    x: number; baseY: number;
+    material: MaterialId;
+    /** Metres per tile. 1 keeps the pack's own scale. */
+    size?: number;
+    anchored?: boolean;
+  }) {
+    const m = o.size ?? 1;
+    const out: Block[] = [];
+    for (let cy = 0; cy < o.rows; cy++) {
+      for (let cx = 0; cx < o.cols; cx++) {
+        const sx = o.tx + cx;
+        const sy = o.ty + cy;
+        if (!o.sheet.covered(sx, sy)) continue;
+        out.push(this.track(this.game.add(new Block(this.game, {
+          // Source row 0 is the top of the image; world Y grows upward, so the grid is
+          // walked downward in source space and upward in world space.
+          x: o.x + (cx + 0.5) * m,
+          y: o.baseY + (o.rows - 1 - cy + 0.5) * m,
+          w: m, h: m,
+          material: o.material,
+          anchored: o.anchored ?? true,
+          skin: { sheet: o.sheet, sx: sx * PPM, sy: sy * PPM, sw: PPM, sh: PPM },
+        }))));
+      }
+    }
+    return out;
+  }
+
+  /** One skinned block — a crate, a barrel, anything meant to be knocked over. */
+  spriteBlock(o: {
+    sheet: Sheet; tx: number; ty: number; tw?: number; th?: number;
+    x: number; baseY: number; material: MaterialId; size?: number; anchored?: boolean;
+  }) {
+    const tw = o.tw ?? 1;
+    const th = o.th ?? 1;
+    const m = o.size ?? 1;
+    return this.track(this.game.add(new Block(this.game, {
+      x: o.x, y: o.baseY + (th * m) / 2,
+      w: tw * m, h: th * m,
+      material: o.material,
+      anchored: o.anchored ?? false,
+      skin: { sheet: o.sheet, sx: o.tx * PPM, sy: o.ty * PPM, sw: tw * PPM, sh: th * PPM },
+    })));
+  }
+
   ledge(x: number, y: number, w: number, h = 1.2) {
     return this.track(this.game.add(new Terrain(this.game, x, y, w, h, this.theme.rock, this.theme.rockTop)));
   }
