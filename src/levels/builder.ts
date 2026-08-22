@@ -686,45 +686,53 @@ export class Builder {
   /**
    * A city block, straight out of the City Tiles pack.
    *
-   * Same trick as `spriteWall` — every cell is a real body wearing its own square of
-   * the sheet — but laid out as a building with a repeating middle, so one call makes a
-   * tower of any height out of a sheet that only draws three storeys.
+   * Same trick as `spriteWall` — every cell is a real body wearing its own square of the
+   * sheet — but laid out the way that sheet is actually organised, which is in **two-row
+   * bands**: rows 0-1 are a blue glass facade, 2-3 tan, 4-5 red, 6-7 magenta, and 8-11
+   * are shopfronts. A naive `spriteWall` six rows tall reads straight down through three
+   * different buildings' worth of colour, which is how you get a tower that changes
+   * material every two metres.
    *
-   * @param x     Left edge, in metres. Matches `spriteWall`, not the `wall` family.
-   * @param tx    Column in the sheet this building's facade starts at.
-   * @param storeys How many times the middle band repeats.
+   * So the ground band and the facade band are named separately and the facade repeats.
+   * One call makes a tower of any height out of a sheet that only draws two storeys.
+   *
+   * @param x Left edge, in metres — matching `spriteWall`, not the `wall` family.
    */
   cityBlock(o: {
     sheet: Sheet;
+    /** Left column in the sheet. Column 2 of any band is the dark doorway. */
     tx: number;
-    /** Rows in the sheet: the ground floor, the repeating middle, and the roof. */
-    groundRow: number;
-    midRow: number;
-    roofRow: number;
     cols: number;
+    /** Top row of the two-row shopfront band used for the ground floor. */
+    groundTy: number;
+    /** Top row of the two-row facade band that repeats above it. */
+    facadeTy: number;
+    /** How many times the facade band repeats. Each is 2 metres. */
     storeys: number;
     x: number;
     baseY: number;
     material: MaterialId;
+    /** Concrete parapet on top, so the building has a lip rather than a raw edge. */
+    parapet?: boolean;
   }) {
     let y = o.baseY;
     this.spriteWall({
-      sheet: o.sheet, tx: o.tx, ty: o.groundRow, cols: o.cols, rows: 1,
+      sheet: o.sheet, tx: o.tx, ty: o.groundTy, cols: o.cols, rows: 2,
       x: o.x, baseY: y, material: o.material,
     });
-    y += 1;
+    y += 2;
     for (let i = 0; i < o.storeys; i++) {
       this.spriteWall({
-        sheet: o.sheet, tx: o.tx, ty: o.midRow, cols: o.cols, rows: 1,
+        sheet: o.sheet, tx: o.tx, ty: o.facadeTy, cols: o.cols, rows: 2,
         x: o.x, baseY: y, material: o.material,
       });
-      y += 1;
+      y += 2;
     }
-    this.spriteWall({
-      sheet: o.sheet, tx: o.tx, ty: o.roofRow, cols: o.cols, rows: 1,
-      x: o.x, baseY: y, material: o.material,
-    });
-    return y + 1;
+    if (o.parapet !== false) {
+      this.block(o.x + o.cols / 2, y + 0.3, o.cols + 0.4, 0.6, "concrete");
+      y += 0.6;
+    }
+    return y;
   }
 
   /**

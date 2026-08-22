@@ -1,4 +1,10 @@
 import { PROVING } from "./proving";
+import { SPIRE } from "./spire";
+import { PIT } from "./pit";
+import { DRIFT } from "./drift";
+import { DOWNTOWN } from "./downtown";
+import { MEADOW } from "./meadow";
+import { COLDSPINE } from "./coldspine";
 import type { LevelDef } from "./types";
 
 /**
@@ -8,10 +14,15 @@ import type { LevelDef } from "./types";
  * playground / campaign / contracts / endless / daily and needed five exports plus a
  * lookup to keep them straight; all of that is gone.
  *
- * The Proving Ground stays first: it is the flattest, most legible arena and the one
- * that teaches the arsenal.
+ * Order is a difficulty and legibility curve, not an authoring order. The Proving
+ * Ground is first because it is the flattest and most legible and it teaches the
+ * arsenal; Long Meadow second because it is the one that teaches *range* without
+ * punishing you for it. The three that change the rules — vertical, bowl, low-gravity
+ * islands — come after both, and the two densest are last.
  */
-export const ARENAS: readonly LevelDef[] = [PROVING];
+export const ARENAS: readonly LevelDef[] = [
+  PROVING, MEADOW, SPIRE, PIT, DRIFT, DOWNTOWN, COLDSPINE,
+];
 
 /** Kept for the attract mode and anything that just wants "an arena to show". */
 export const LEVELS = ARENAS;

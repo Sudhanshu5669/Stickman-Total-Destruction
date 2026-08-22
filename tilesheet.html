@@ -1,0 +1,30 @@
+<!doctype html><meta charset=utf-8><title>Tilesheet inspector</title>
+<style>body{background:#20242e;color:#f4f1e8;font:13px monospace;margin:0;padding:16px}
+canvas{image-rendering:pixelated;display:block;margin:8px 0 20px}h2{font-size:13px;color:#ffd23f;margin:12px 0 4px}</style>
+<div id=out></div>
+<script type="module">
+const sheets = [
+  ["City/Building Tiles 32x32.png","/src/Assets/GandalfHardcore City Tiles/Building Tiles 32x32.png",3],
+  ["City/city tiles 32x32.png","/src/Assets/GandalfHardcore City Tiles/GandalfHardcore city tiles 32x32.png",3],
+  ["City/Decoration 32x32.png","/src/Assets/GandalfHardcore City Tiles/Decoration 32x32.png",3],
+];
+const out=document.getElementById("out");
+for (const [name,src,z] of sheets){
+  const img=new Image(); img.src=src; await img.decode().catch(()=>{});
+  const h=document.createElement("h2");
+  h.textContent = `${name}  —  ${img.naturalWidth}x${img.naturalHeight} = ${img.naturalWidth/32} x ${img.naturalHeight/32} tiles`;
+  out.appendChild(h);
+  const c=document.createElement("canvas");
+  c.width=img.naturalWidth*z; c.height=img.naturalHeight*z;
+  const g=c.getContext("2d"); g.imageSmoothingEnabled=false;
+  g.drawImage(img,0,0,c.width,c.height);
+  // tile grid + indices
+  g.strokeStyle="rgba(255,210,63,0.35)"; g.lineWidth=1;
+  g.font="10px monospace"; g.fillStyle="rgba(255,210,63,0.9)";
+  for(let ty=0;ty<img.naturalHeight/32;ty++) for(let tx=0;tx<img.naturalWidth/32;tx++){
+    g.strokeRect(tx*32*z,ty*32*z,32*z,32*z);
+    if(tx%2===0&&ty%2===0) g.fillText(`${tx},${ty}`, tx*32*z+2, ty*32*z+10);
+  }
+  out.appendChild(c);
+}
+</script>

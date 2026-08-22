@@ -685,14 +685,38 @@ export class Game implements GameCtx {
     }
   }
 
+  /**
+   * Keeps the player inside the arena, horizontally and — where a level asks for it —
+   * vertically.
+   *
+   * A soft push rather than a wall. Being *stopped* by an invisible surface is the most
+   * obvious possible admission that the world ends here; being gently unable to make
+   * further progress reads as running out of thrust, which is a thing that happens to
+   * jetpacks anyway.
+   *
+   * The ceiling exists for the vertical arenas. Without one, a full tank takes the
+   * player far enough above a forty-metre tower that the tower is a speck and the arena
+   * has effectively stopped — and there is nothing up there, because there is nothing
+   * up there to build.
+   */
   private clampPlayerToBounds() {
     const p = this.player.pos;
     const { min, max } = this.level.bounds;
+    const pelvis = this.player.ragdoll.bone("pelvis").body;
+
     if (p.x < min || p.x > max) {
-      const pelvis = this.player.ragdoll.bone("pelvis").body;
       const target = clamp(p.x, min, max);
       const dv = (target - p.x) * 6 - pelvis.linvel().x;
       pelvis.applyImpulse(v(dv * pelvis.mass() * 0.4, 0), true);
+    }
+
+    const roof = this.level.ceiling;
+    // Eased in over the last four metres, so the limit is felt as thickening air well
+    // before it is reached rather than as a lid arrived at suddenly.
+    if (roof !== undefined && p.y > roof - 4) {
+      const over = clamp((p.y - (roof - 4)) / 4, 0, 1);
+      const vy = pelvis.linvel().y;
+      if (vy > 0) pelvis.applyImpulse(v(0, -vy * over * pelvis.mass() * 0.35), true);
     }
   }
 

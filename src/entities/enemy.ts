@@ -184,6 +184,13 @@ const CROUCH_DROP = 0.45;
 const CHEST_STAND = 1.2;
 const CHEST_CROUCH = 0.78;
 
+/** Seconds between sightline tests. See `Enemy.look`. */
+const LOOK_INTERVAL = 1 / 20;
+/** The fixed step this entity is ticked at, for the throttles above. */
+const FIXED_STEP = 1 / 60;
+/** How many one-metre steps out the cover fan reaches. Past six it is a different room. */
+const COVER_STEPS = 6;
+
 const STEP_UP = 1.4;
 const STEP_DOWN = 1.6;
 
@@ -398,6 +405,8 @@ export class Enemy implements Actor {
   /** Where the player was last known to be, from this enemy's own eyes or a squadmate's. */
   private lastSeen: V | null = null;
   private lastSeenAt = -99;
+  /** Throttle on the sightline test. See `look`. */
+  private lookCd = 0;
   /** World X of the cover spot being used or moved toward. */
   private coverX: number | null = null;
   /** Throttle on the cover search — it costs a fan of raycasts. */
@@ -479,6 +488,16 @@ export class Enemy implements Actor {
       this.hasTarget = false;
       return false;
     }
+
+    // Sightlines are re-tested at 20 Hz, not 60, and phase-offset per enemy so a squad
+    // never tests on the same frame. This was measured as the most expensive single
+    // thing the AI does — a ray per enemy per step is 900 raycasts a second across a
+    // garrison — and a third of a step of staleness in "can I see him" is well under
+    // the reaction delay every enemy already waits out before firing.
+    this.lookCd -= FIXED_STEP;
+    if (this.lookCd > 0) return this.hasTarget;
+    this.lookCd = LOOK_INTERVAL + this.slot * 0.008;
+
     const eye = r.bonePos("torso");
     const d = dist(eye, target.aimPos);
     // The pelvis is excluded or the enemy's own body blocks the query at point blank.
@@ -745,6 +764,11 @@ export class Enemy implements Actor {
    * seconds ago — which is the only kind of cover this game reliably has.
    */
   private findCover(target: TargetRef): number | null {
+    // Nothing here a moment ago means nothing here now. A *successful* search is cheap
+    // — it stops at the first hit — but a failed one walks the entire fan, and an enemy
+    // standing in the open with no cover anywhere is precisely the case that fails, so
+    // without this the most expensive path is also the most frequently taken one.
+    if (this.game.time < this.noCoverUntil) return null;
     const phys = this.game.physics;
     const body = this.ragdoll.bone("pelvis").body;
     const here = this.pos;
@@ -756,7 +780,7 @@ export class Enemy implements Actor {
     // A stickman standing in the open behind a parapet is already in the right *place*
     // and wrong only about its height; a search that starts a metre away will march it
     // sideways to an equivalent spot and call that taking cover.
-    for (let i = 0; i <= 8; i++) {
+    for (let i = 0; i <= COVER_STEPS; i++) {
       // Away from the player first — that is where cover usually is — but both sides
       // are considered, because the nearest wall is sometimes one you are already past.
       for (const side of (i === 0 ? [away] : [away, -away as 1 | -1])) {
@@ -804,8 +828,12 @@ export class Enemy implements Actor {
       }
       if (best !== null && bestScore > -3) break;
     }
+    if (best === null) this.noCoverUntil = this.game.time + rand(2.2, 3.2);
     return best;
   }
+
+  /** Game time before which the cover search is known to be pointless. See `findCover`. */
+  private noCoverUntil = 0;
 
   /** Close the distance rather than trading at a range the weapon cannot hold. */
   private actFlank(dt: number, c: CombatSpec, target: TargetRef) {
