@@ -16,22 +16,21 @@ import { Enemy, alertNearby } from "./entities/enemy";
 import { Block, Debris } from "./entities/block";
 import { Hud, type HudState } from "./ui/hud";
 import { Menu, type MenuAction } from "./ui/menu";
-import { previousCost, progress, type RunStats } from "./ui/progress";
+import { progress } from "./ui/progress";
 import { TouchControls } from "./ui/touch";
 import { Coach, type CoachInput } from "./ui/coach";
 import { settings } from "./ui/settings";
 import { portal } from "./platform/portal";
 import { primeKeyLabels } from "./core/keylabel";
-import { Story } from "./ui/story";
 import { preload } from "./render/sprites";
 import { fromEnergy, hit as juiceHit, kill as juiceKill, resetJuice } from "./fx/juice";
-import type { ResultCard } from "./ui/menu";
 import { DemoDriver } from "./ai/demo";
 import { Builder } from "./levels/builder";
-import { CAMPAIGN, DAILY, LEVELS, LEVEL_ASSETS, levelById } from "./levels";
-import type { LevelDef, LevelInfo, LevelKind } from "./levels/types";
+import { LEVELS, LEVEL_ASSETS, levelById } from "./levels";
+import type { LevelDef, LevelInfo } from "./levels/types";
 import { clamp, damp, lerp, rand, v, type V } from "./core/math";
 import { Bullet } from "./entities/bullet";
+import { AMMO_BY_ID } from "./weapons/ammo";
 import { CreatureProjectile, RigidProjectile } from "./entities/projectile";
 import type { TargetRef } from "./core/types";
 
@@ -45,13 +44,14 @@ const BASE_GRAVITY = -26;
 const DEMO_RELOAD = 52;
 
 /**
- * `story` is the cutscene: no world simulated, no HUD, its own input handling. It sits
- * between the menu and a level rather than inside either.
+ * There are two states and no third.
+ *
+ * The build this replaced also had a `story` mode for cutscenes and an `outcome` that
+ * could be won or lost. An arena cannot be won — there is no objective — and it cannot
+ * be lost — dying costs you nothing but the walk back. Deleting both is most of the
+ * reason the game is no longer confusing to look at.
  */
-export type Mode = "menu" | "playing" | "story";
-
-/** How a run ended. Drives the result overlay; null while it is still going. */
-export type Outcome = "won" | "lost" | null;
+export type Mode = "menu" | "playing";
 
 export class Game implements GameCtx {
   readonly canvas: HTMLCanvasElement;
@@ -79,21 +79,11 @@ export class Game implements GameCtx {
   theme: Theme = THEMES.day;
 
   mode: Mode = "menu";
-  /** Which set of rules the current run plays under. See `LevelDef.kind`. */
-  runKind: LevelKind = "playground";
   private demo: DemoDriver | null = null;
   private demoAge = 0;
 
-  /** Set once a campaign mission is won or lost, or an endless run ends. */
-  outcome: Outcome = null;
-  /** Campaign: knockouts left. Ignored in the other modes. */
-  livesLeft = 3;
-  /** Latched so a single death only ever costs one life. */
-  private wasDown = false;
-  /** Endless: kills this run, mirrored onto the director for the HUD. */
+  /** Hostiles put down this session. Presentation only — nothing gates on it. */
   private kills = 0;
-  /** The furthest previous run, sampled when this one started. Never updated mid-run. */
-  private bestDistance = 0;
 
   private actors: Actor[] = [];
   private pending: Actor[] = [];
@@ -124,17 +114,9 @@ export class Game implements GameCtx {
   /** On-screen controls; inert until a real touch arrives. */
   readonly touch: TouchControls;
 
-  // ------------------------------------------------------------- run bookkeeping
-  /** Carnage banked when this run ended, and what it bought. */
-  private earned = 0;
+  // ------------------------------------------------------------- session bookkeeping
+  /** Rounds this session's carnage has bought, drained as each one is announced. */
   private unlockedThisRun: string[] = [];
-  /** Leaderboard placing, filled in asynchronously after a run ends. */
-  private rank: number | null = null;
-  /** Medals, streak and best-run bonus for the run that just ended. Set once by `finish()`. */
-  private lastScoreResult: ReturnType<typeof progress.scoreRun> | null = null;
-  /** One revive per run, and only when a portal is actually there to pay for it. */
-  private reviveUsed = false;
-  private reviving = false;
 
   paused = false;
   showDebug = false;
@@ -223,10 +205,9 @@ export class Game implements GameCtx {
 
     this.player = this.add(new Player(this, this.input, this.level.spawn.x, this.level.spawn.y));
     this.flushPending();
-    // Missions issue a fixed loadout; everything else gets the whole arsenal.
-    this.player.weapon.setLoadout(def.loadout);
-    // God mode is a session cheat, but a mission that forbids it forbids it.
-    this.player.setGod(this.godMode && this.godAllowed);
+    // You carry what you have earned, everywhere. Nothing confiscates a round any more.
+    this.player.weapon.setLoadout(null);
+    this.player.setGod(this.godMode);
 
     if (def.hazard) {
       this.add(def.hazard(this));
@@ -254,11 +235,6 @@ export class Game implements GameCtx {
     resetJuice();
   }
 
-  /** True when the current level permits the god-mode cheat. Campaign never does. */
-  private get godAllowed() {
-    return this.levelDef.allowGod !== false;
-  }
-
   /**
    * Banks whatever the current run earned before it is torn down, so quitting to the
    * menu mid-run still counts. `recordDistance` only ever moves the record forward,
@@ -283,88 +259,32 @@ export class Game implements GameCtx {
     const delta = Math.floor(this.score) - this.bankedScore;
     if (delta > 0) {
       this.bankedScore = Math.floor(this.score);
-      this.earned = this.bankedScore;
       this.unlockedThisRun.push(...progress.addCarnage(delta));
+      // Announced where it happened, over whatever just paid for it.
+      if (this.mode === "playing" && this.player) this.announceUnlocks(this.player.pos);
     }
 
-    if (this.runKind !== "endless") return;
-    const d = this.level?.director;
-    if (!d) return;
-    if (this.levelDef === DAILY) {
-      progress.recordDaily(this.score, d.distance);
-      portal.submitScore("daily", this.score);
-    } else {
-      progress.recordDistance(d.distance);
-      portal.submitScore("distance", Math.floor(d.distance));
-    }
   }
 
   /** Score already paid into carnage this run, so banking twice cannot double-charge. */
   private bankedScore = 0;
 
-  /** The cutscene, while one is playing. Null the rest of the time. */
-  private story: Story | null = null;
-  /** The level the cutscene is a prologue to, started the moment it finishes. */
-  private storyNext: LevelDef | null = null;
-  /** Latched so a level's `onCleared` beat can only ever fire once. */
-  private clearedFired = false;
-
-  /**
-   * Starts a level, playing its intro first if it has one this player has not seen.
-   *
-   * The cutscene is checked here rather than at the menu so that every route into a
-   * contract — the PLAY button, the picker, a retry, a `nextMission` — gets the same
-   * answer, and so that `progress.contract` is the single thing deciding it.
-   */
+  /** Drops the player into an arena. There is no prologue and nothing to unlock first. */
   startLevel(def: LevelDef) {
-    if (def.intro && progress.contract < (def.order ?? 1)) {
-      this.beginStory(def);
-      return;
-    }
     this.enterLevel(def);
-  }
-
-  /** Runs the prologue. The level is loaded underneath it so the cut is instant. */
-  private beginStory(def: LevelDef) {
-    this.bankRun();
-    this.mode = "story";
-    this.story = new Story();
-    this.storyNext = def;
-    this.paused = false;
-    this.outcome = null;
-    this.canvas.style.cursor = "default";
-    portal.gameplayStop();
-    sfx.setMood("menu");
-    this.input.consumeEdges();
   }
 
   private enterLevel(def: LevelDef) {
     this.bankRun();
     this.mode = "playing";
-    this.runKind = def.kind ?? "playground";
     this.demo = null;
     this.paused = false;
-    this.outcome = null;
     this.hintAlpha = 1;
-    this.wasDown = false;
-    this.livesLeft = def.lives ?? 3;
-    this.bestDistance = progress.bestDistance;
-    this.earned = 0;
     this.bankedScore = 0;
     this.unlockedThisRun = [];
-    this.rank = null;
-    this.lastScoreResult = null;
-    this.reviveUsed = false;
-    this.reviving = false;
-    this.clearedFired = false;
     this.loadLevel(def);
-    // Equipment, after the player exists.
-    //
-    // The pack is standard kit in every mode — the playgrounds and endless are built
-    // around flight and always were. Only a level that explicitly gates it goes
-    // without, and only until it has been earned: replaying the first contract after
-    // finishing it lets you fly, because taking a reward back is not a story beat.
-    this.player.hasJetpack = def.noJetpack ? progress.hasJetpack : true;
+    // Standard kit, always. Every arena is built around being able to fly.
+    this.player.hasJetpack = true;
     this.coach.begin();
     portal.gameplayStart();
     this.player.control = null;
@@ -374,23 +294,13 @@ export class Game implements GameCtx {
     sfx.levelUp();
   }
 
-  /** Advances to the next campaign mission, or back to the menu after the last one. */
-  nextMission() {
-    const i = CAMPAIGN.indexOf(this.levelDef);
-    if (i >= 0 && i + 1 < CAMPAIGN.length) this.startLevel(CAMPAIGN[i + 1]);
-    else this.enterMenu();
-  }
-
   /** Returns to the start menu, where the selected world plays itself. */
   enterMenu() {
     this.bankRun();
     portal.gameplayStop();
     this.touch.release();
     this.mode = "menu";
-    this.runKind = "playground";
-    this.outcome = null;
     this.paused = false;
-    // Armed and endless levels can't be demoed — see Menu.previewLevel.
     this.loadLevel(this.menu.previewLevel);
     this.demo = new DemoDriver(this);
     this.demo.reset(this.level.spawn);
@@ -536,7 +446,6 @@ export class Game implements GameCtx {
       // softer than the crate next to it.
       juiceKill(this, at);
       this.kills++;
-      this.level.director?.countKill();
     }
     // First callout at 5 lands inside an ordinary collapse, so the chain mechanic is
     // taught on the first building the player brings down rather than never.
@@ -569,21 +478,9 @@ export class Game implements GameCtx {
     this.menu.lastMouse.x = this.input.mouse.x;
     this.menu.lastMouse.y = this.input.mouse.y;
 
-    if (this.mode === "story") {
-      this.updateStory(rawDt);
-      this.render(rawDt);
-      this.input.consumeEdges();
-      return;
-    }
-
     if (this.mode === "menu") {
       this.menu.update(rawDt);
       this.handleMenuInput();
-      this.simulate(rawDt);
-    } else if (this.outcome) {
-      // The world keeps settling behind the result card — the last building you
-      // knocked over should be allowed to finish falling.
-      this.handleResultInput();
       this.simulate(rawDt);
     } else if (this.paused) {
       this.handlePauseInput();
@@ -593,7 +490,7 @@ export class Game implements GameCtx {
 
     // Anything the sim didn't consume (paused, or a frame with no fixed step in menu
     // mode) is dropped here so edges can't pile up across states.
-    if (this.mode !== "playing" || this.paused || this.outcome) this.input.consumeEdges();
+    if (this.mode !== "playing" || this.paused) this.input.consumeEdges();
 
     this.render(rawDt);
   };
@@ -654,8 +551,6 @@ export class Game implements GameCtx {
       }
     }
 
-    if (this.mode === "playing" && !this.outcome) this.checkOutcome(rawDt);
-
     if (this.demo) {
       this.demoAge += rawDt;
       this.demo.update(rawDt, this.player, this.level.bounds);
@@ -666,236 +561,30 @@ export class Game implements GameCtx {
     this.updateCamera(rawDt);
   }
 
-  // ------------------------------------------------------------------ outcome
-
-  /** Delay between the last hostile dropping and the victory card, so it lands. */
-  private winDelay = 0;
+  // ------------------------------------------------------------------ session
 
   /**
-   * Watches for the end of a run.
+   * Pays the session into the permanent record and announces anything it bought.
    *
-   * Only campaign missions can be *won* — a playground world has no objective, and
-   * endless has no end. Campaign and endless can both be *lost* by running out of
-   * lives; playground can't, because dying there is the whole point.
+   * This replaces the whole outcome/result-card apparatus. There is no win, no loss, no
+   * lives and no card, because an arena has no objective to succeed or fail at — so the
+   * only moment worth marking is the one where carnage turns into a new round to fire,
+   * and that is worth marking *immediately*, in the world, over the thing you just broke.
    */
-  private checkOutcome(dt: number) {
-    // A knockdown costs a life on the frame it happens, latched so one death is
-    // never billed twice while the corpse lies there waiting to respawn.
-    const down = this.player.isDown;
-    if (down && !this.wasDown) {
-      this.wasDown = true;
-      if (this.runKind !== "playground" && !this.player.god) {
-        this.livesLeft--;
-        if (this.livesLeft <= 0) {
-          this.finish("lost");
-          return;
-        }
-        this.particles.popup(this.player.pos.x, this.player.pos.y + 2.4,
-          `${this.livesLeft} ${this.livesLeft === 1 ? "LIFE" : "LIVES"} LEFT`, "#e8433a", 0.9);
-      }
-    } else if (!down) {
-      this.wasDown = false;
+  private announceUnlocks(at: V) {
+    if (!this.unlockedThisRun.length) return;
+    for (const id of this.unlockedThisRun) {
+      const a = AMMO_BY_ID.get(id);
+      this.particles.popup(at.x, at.y + 3.2, `UNLOCKED — ${(a?.name ?? id).toUpperCase()}`, "#ffd23f", 1.1);
     }
-
-    if (this.runKind === "endless") return;
-
-    if (this.runKind !== "campaign") return;
-
-    let alive = 0;
-    for (const e of this.level.enemies) if (!e.ragdoll.dead) alive++;
-    if (alive > 0) {
-      this.winDelay = 0;
-      return;
-    }
-    // A level with a closing beat owns its own ending from here: the game stops
-    // counting down and waits to be told. See `LevelInfo.onCleared`.
-    if (this.level.onCleared) {
-      if (!this.clearedFired) {
-        this.clearedFired = true;
-        this.level.onCleared(this, () => this.finish("won"));
-      }
-      return;
-    }
-
-    this.winDelay += dt;
-    if (this.winDelay > 1.4) this.finish("won");
+    this.unlockedThisRun = [];
+    this.player.weapon.setLoadout(null);
+    this.flash(0.25, "#ffd23f");
+    portal.happytime();
   }
 
   equipJetpack() {
     this.player.hasJetpack = true;
-  }
-
-  private finish(outcome: Outcome) {
-    this.outcome = outcome;
-    this.canvas.style.cursor = "default";
-    this.touch.release();
-    portal.gameplayStop();
-
-    if (outcome === "won") {
-      // Contracts and the older campaign share run rules but not a progress counter:
-      // both are `kind: "campaign"` and both are order 1, so writing one from the other
-      // would have a finished contract unlocking mission 2 of a different list.
-      if (this.levelDef.intro) progress.finishContract(this.levelDef.order ?? 1);
-      else if (this.runKind === "campaign") progress.clear(this.levelDef.order ?? 0);
-      sfx.levelUp();
-      portal.happytime();
-    } else {
-      sfx.ui(false);
-    }
-
-    const before = this.unlockedThisRun.length;
-    this.bankRun();
-
-    // Medals, the daily streak and the best-run bonus, all in one call — see
-    // `progress.scoreRun`. Folded straight into `earned` so the one big number on the
-    // result card stays honest rather than needing a second "+bonus" line to explain it.
-    const stats: RunStats = {
-      score: this.score, blocks: this.blocksDestroyed, kills: this.kills,
-      bestChain: this.comboMax, seconds: this.time,
-    };
-    this.lastScoreResult = progress.scoreRun(stats);
-    this.earned += this.lastScoreResult.bonus;
-    this.unlockedThisRun.push(...this.lastScoreResult.unlocked);
-
-    if (this.unlockedThisRun.length > before) {
-      sfx.levelUp();
-      portal.happytime();
-    }
-    if (this.runKind === "endless") void this.fetchRank(this.levelDef === DAILY ? "daily" : "distance");
-  }
-
-  /**
-   * Asks the portal where this run placed.
-   *
-   * Fired and forgotten on purpose — the results card renders immediately without it
-   * and picks the rank up on a later frame if it arrives. A leaderboard having a bad
-   * day must never be something the player can feel.
-   */
-  private async fetchRank(board: string) {
-    const entry = await portal.rank(board);
-    if (entry && this.outcome) this.rank = entry.rank;
-  }
-
-  /** True while a revive is a real offer: endless only, once, and only on a portal. */
-  private get canRevive() {
-    return this.outcome === "lost" && this.runKind === "endless"
-      && !this.reviveUsed && !this.reviving && portal.available;
-  }
-
-  /**
-   * Trades an ad for the run the player just lost.
-   *
-   * Offered rather than forced, and only on the run they were most invested in —
-   * this is the one interruption a player reliably *wants*, which is why it is the
-   * only rewarded placement in the game.
-   */
-  private async revive() {
-    if (!this.canRevive) return;
-    this.reviving = true;
-    const result = await portal.rewarded();
-    this.reviving = false;
-    if (result !== "watched") {
-      // Nothing to show or nothing watched: leave the card exactly as it was, minus
-      // the offer, so a broken ad slot cannot strand the player on a dead screen.
-      this.reviveUsed = true;
-      return;
-    }
-
-    this.reviveUsed = true;
-    this.outcome = null;
-    this.rank = null;
-    this.wasDown = false;
-    this.livesLeft = 1;
-    this.canvas.style.cursor = "none";
-
-    // Landing back in the middle of whatever killed you would be a swindle: clear the
-    // immediate area, put the player back on their feet, and hand back the carnage
-    // that was banked on death so the run keeps accumulating into one score.
-    const p = this.player.pos;
-    for (const e of this.level.enemies) {
-      if (!e.ragdoll.dead && Math.abs(e.pos.x - p.x) < 22) e.ragdoll.takeDamage(1e6, e.pos);
-    }
-    this.player.respawn(v(p.x, p.y + 3));
-    this.flash(0.5, "#ffd23f");
-    this.camera.addTrauma(0.3);
-    this.input.consumeEdges();
-    portal.gameplayStart();
-  }
-
-  /** The end-of-run overlay, per mode. */
-  private resultCard(): ResultCard {
-    const d = this.level.director;
-    const won = this.outcome === "won";
-    const next = progress.nextUnlock();
-    const meta = {
-      earned: this.earned,
-      carnage: progress.carnage,
-      unlocked: this.unlockedThisRun,
-      next: next
-        ? {
-            id: next.id,
-            remaining: Math.max(0, next.cost - next.have),
-            // Measured from the previous rung, not from zero — a bar that creeps a
-            // pixel per run tells the player nothing about how close they are.
-            frac: (next.have - previousCost(next.cost)) / Math.max(1, next.cost - previousCost(next.cost)),
-          }
-        : null,
-      rank: this.rank,
-      canRevive: this.canRevive,
-      // Beating your own best run is the one bonus that gets harder to claim the more
-      // you play, so it is the one worth naming rather than folding silently into the
-      // earnings number above.
-      record: this.lastScoreResult && this.lastScoreResult.bestDelta > 0 ? "NEW BEST RUN" : undefined,
-      medals: this.lastScoreResult?.medals,
-      streak: this.lastScoreResult?.streak ?? null,
-    };
-    const stats: [string, string][] = [
-      ["SCORE", this.score.toLocaleString("en-US")],
-      ["BEST CHAIN", `x${this.comboMax}`],
-      ["BLOCKS SMASHED", `${this.blocksDestroyed}`],
-      ["TIME", `${this.time.toFixed(1)}s`],
-    ];
-
-    if (this.runKind === "endless") {
-      stats.unshift(["DISTANCE", `${Math.floor(d?.distance ?? 0)}m`]);
-      stats.splice(1, 0, ["HOSTILES DOWN", `${this.kills}`]);
-      const daily = this.levelDef === DAILY;
-      return {
-        ...meta,
-        won: false,
-        title: daily ? "DAILY COMPLETE" : "RUN OVER",
-        // Compared against the record as it stood when this run started — `finish`
-        // has already banked the new one by the time this card is built.
-        subtitle: daily
-          ? "Same world for everybody today. Come back tomorrow for a new one."
-          : (d?.distance ?? 0) > this.bestDistance
-            ? "A new furthest run."
-            : `Furthest run so far: ${Math.floor(this.bestDistance)}m.`,
-        stats,
-        hasNext: false,
-        retryLabel: daily ? "REPLAY TODAY" : "RUN AGAIN",
-      };
-    }
-
-    stats.unshift(["HOSTILES DOWN", `${this.level.enemies.length - this.aliveEnemies()}/${this.level.enemies.length}`]);
-    const last = CAMPAIGN.indexOf(this.levelDef) === CAMPAIGN.length - 1;
-    return {
-      ...meta,
-      won,
-      title: won ? "MISSION COMPLETE" : "MISSION FAILED",
-      subtitle: won
-        ? (last ? "That was the last of them. The campaign is yours." : `${this.levelDef.name} is clear.`)
-        : "Out of lives. They are still standing.",
-      stats,
-      hasNext: won && !last,
-      retryLabel: won ? "REPLAY MISSION" : "TRY AGAIN",
-    };
-  }
-
-  private aliveEnemies() {
-    let n = 0;
-    for (const e of this.level.enemies) if (!e.ragdoll.dead) n++;
-    return n;
   }
 
   private fixedUpdate(dt: number) {
@@ -1073,7 +762,7 @@ export class Game implements GameCtx {
     sfx.setAdPlaying(portal.adPlaying);
     const half = this.camera.visibleHalf();
     sfx.listener(this.camera.pos.x, this.camera.pos.y, half.x);
-    sfx.setMood(this.mode !== "playing" ? "menu" : this.outcome ? "result" : "combat");
+    sfx.setMood(this.mode !== "playing" ? "menu" : "combat");
   }
 
   // ------------------------------------------------------------------ input
@@ -1084,7 +773,7 @@ export class Game implements GameCtx {
     if (portal.adPlaying) return;
     const pause = this.input.pressed("KeyP", "Backspace") || this.touch.pausePressed;
     this.touch.pausePressed = false;
-    if (this.mode === "playing" && !this.outcome && pause) {
+    if (this.mode === "playing" && pause) {
       // Back out of the options panel first — it is drawn over the pause menu, and
       // unpausing straight through it leaves the game running with the panel armed.
       if (this.paused && this.menu.closeOptions()) {
@@ -1106,37 +795,6 @@ export class Game implements GameCtx {
     }
   }
 
-  /**
-   * Runs the cutscene.
-   *
-   * Any confirm input advances it; the skip control and the pause key end it outright.
-   * Nothing here touches the world — the level is not loaded until the fade completes,
-   * so a long cutscene costs no simulation.
-   */
-  private updateStory(dt: number) {
-    const st = this.story;
-    if (!st) {
-      this.enterMenu();
-      return;
-    }
-    const clicked = this.input.mousePressed;
-    const skip = this.input.pressed("Backspace", "KeyP")
-      || (clicked && st.hitSkip(this.input.mouse.x, this.input.mouse.y));
-    if (skip) st.skip();
-
-    // A click that hit SKIP must not also advance the line underneath it.
-    const advance = !skip && (clicked || this.input.pressed("Enter", "NumpadEnter", "Space"));
-    st.update(dt, advance);
-
-    // Hold on black for the length of the fade, then cut into the level underneath.
-    if (!st.done || st.fade < 1) return;
-    const def = this.storyNext;
-    this.story = null;
-    this.storyNext = null;
-    if (def) this.enterLevel(def);
-    else this.enterMenu();
-  }
-
   private handleMenuInput() {
     const m = this.menu;
     if (this.input.pressed("ArrowRight", "KeyD")) {
@@ -1151,13 +809,8 @@ export class Game implements GameCtx {
       this.applyMenuAction(m.confirm());
       return;
     } else if (this.input.pressed("Backspace")) {
-      if (m.back()) {
-        sfx.ui(false);
-        this.enterMenu();
-      }
+      m.back();
       return;
-    } else if (this.input.pressed("KeyM")) {
-      sfx.toggleMute();
     }
 
     if (this.input.mousePressed) {
@@ -1173,64 +826,9 @@ export class Game implements GameCtx {
       case "play":
         this.startLevel(a.level);
         break;
-      case "screen":
-        this.menu.goTo(a.screen);
-        sfx.ui(true);
-        // Preview whatever the new screen has selected, immediately.
-        this.enterMenu();
-        break;
-      case "back":
-        this.menu.back();
-        sfx.ui(false);
-        this.enterMenu();
-        break;
       case "select":
-        sfx.ui(true);
-        this.enterMenu();
-        break;
-      case "mute":
-        sfx.toggleMute();
-        break;
-      default:
-        break;
-    }
-  }
-
-  /** Buttons on the mission-complete / run-over card. */
-  private handleResultInput() {
-    // An ad is on screen; the card underneath must not react to anything.
-    if (this.reviving || portal.adPlaying) return;
-
-    if (this.input.pressed("Enter", "NumpadEnter", "Space")) {
-      // One key, and it always takes the *free* way forward — next mission if there
-      // is one, otherwise a retry. Deliberately never the revive: this is the key a
-      // player mashes on the death screen, and spending that reflex on an ad request
-      // they did not choose is the definition of a manipulated button. The revive is
-      // right beside it on screen, the same size, one click away.
-      if (this.resultCard().hasNext) this.nextMission();
-      else this.restart();
-      return;
-    }
-    if (this.input.pressed("Backspace")) {
-      this.enterMenu();
-      return;
-    }
-    if (!this.input.mousePressed) {
-      this.menu.hover(this.input.mouse.x, this.input.mouse.y);
-      return;
-    }
-    const a = this.menu.click(this.input.mouse.x, this.input.mouse.y);
-    switch (a.kind) {
-      case "revive":
-        void this.revive();
-        break;
-      case "next":
-        this.nextMission();
-        break;
-      case "restart":
-        this.restart();
-        break;
-      case "quit":
+        // Re-enter the menu so the attract mode swaps to the arena just picked: the
+        // preview *is* the thumbnail, so selecting has to rebuild the world behind it.
         this.enterMenu();
         break;
       default:
@@ -1263,14 +861,6 @@ export class Game implements GameCtx {
 
   /** Invincibility cheat. Announces itself over the player so the state is never a mystery. */
   private toggleGod() {
-    if (!this.godAllowed) {
-      // Campaign missions are the one place the cheat is off the table. Say so
-      // rather than silently swallowing the key.
-      const c = this.player.pos;
-      this.particles.popup(c.x, c.y + 2.2, "NOT IN CAMPAIGN", "#e8433a", 0.85);
-      sfx.ui(false);
-      return;
-    }
     this.godMode = !this.godMode;
     this.player.setGod(this.godMode);
     const c = this.player.pos;
@@ -1314,12 +904,6 @@ export class Game implements GameCtx {
     const h = this.canvas.clientHeight;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    // The cutscene is the whole frame: no world, no HUD, no crosshair.
-    if (this.mode === "story" && this.story) {
-      this.story.draw(ctx, w, h);
-      return;
-    }
 
     // Resample the aim against the camera we are about to draw with.
     //
@@ -1371,11 +955,6 @@ export class Game implements GameCtx {
 
     this.hud.draw(ctx, w, h, this.hudState(), dt);
 
-    if (this.outcome) {
-      this.menu.drawResult(ctx, w, h, this.resultCard());
-      return;
-    }
-
     if (this.paused) {
       this.menu.drawPause(ctx, w, h, this.levelDef.name);
       return;
@@ -1396,7 +975,7 @@ export class Game implements GameCtx {
   /** What the coach needs to know about this frame. See `ui/coach.ts`. */
   private coachInput(): CoachInput {
     return {
-      live: !this.paused && !this.outcome && !this.player.isDown,
+      live: !this.paused && !this.player.isDown,
       firing: this.input.mouseDown || this.firedEdgeThisFrame,
       moveX: this.input.moveX,
       ammoIndex: this.player.weapon.index,
@@ -1430,20 +1009,14 @@ export class Game implements GameCtx {
       respawnIn: this.player.respawnIn,
       time: this.time,
       fps: this.fps,
-      god: this.godMode && this.godAllowed,
+      god: this.godMode,
       showDebug: this.showDebug,
       bodies: this.physics.bodyCount,
       particles: this.particles.active,
       muted: sfx.muted,
       paused: this.paused,
-      // The control card has no business showing through the end-of-run overlay.
-      hintAlpha: this.outcome ? 0 : this.hintAlpha,
+      hintAlpha: this.hintAlpha,
       levelName: this.levelDef.name,
-      mode: this.runKind,
-      lives: this.livesLeft,
-      briefing: this.levelDef.briefing ?? "",
-      distance: this.level.director?.distance ?? 0,
-      bestDistance: Math.max(this.bestDistance, this.level.director?.distance ?? 0),
       kills: this.kills,
     };
   }

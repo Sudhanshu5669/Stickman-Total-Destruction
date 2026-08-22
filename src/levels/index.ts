@@ -1,28 +1,25 @@
-import { SANDBOX } from "./sandbox";
-import { CASTLE } from "./castle";
-import { ALIEN } from "./alien";
-import { MARS } from "./mars";
-import { HOLLOWBROOK } from "./hollowbrook";
-import { CAMPAIGN } from "./campaign";
-import { CONTRACTS } from "./contracts";
-import { DAILY, ENDLESS } from "./endless";
+import { PROVING } from "./proving";
 import type { LevelDef } from "./types";
 
-/** Free-play worlds. The sandbox stays first: it is the one that teaches the arsenal. */
-export const PLAYGROUND: readonly LevelDef[] = [SANDBOX, HOLLOWBROOK, CASTLE, ALIEN, MARS];
+/**
+ * Every arena in the game.
+ *
+ * One flat list, because there is one mode. The previous build split this into
+ * playground / campaign / contracts / endless / daily and needed five exports plus a
+ * lookup to keep them straight; all of that is gone.
+ *
+ * The Proving Ground stays first: it is the flattest, most legible arena and the one
+ * that teaches the arsenal.
+ */
+export const ARENAS: readonly LevelDef[] = [PROVING];
 
-/** Kept for the attract mode and anything that just wants "a world to show". */
-export const LEVELS = PLAYGROUND;
+/** Kept for the attract mode and anything that just wants "an arena to show". */
+export const LEVELS = ARENAS;
 
-export { CAMPAIGN, CONTRACTS, DAILY, ENDLESS };
-
-/** Every level the game knows about, in every mode. */
-export const ALL_LEVELS: readonly LevelDef[] = [...PLAYGROUND, ...CONTRACTS, ...CAMPAIGN, ENDLESS, DAILY];
-
-/** Every sprite sheet any level needs up front. Boot warms these in one pass. */
+/** Every sprite sheet any arena needs up front. Boot warms these in one pass. */
 export const LEVEL_ASSETS: readonly string[] =
-  [...new Set(ALL_LEVELS.flatMap((l) => l.assets ?? []))];
+  [...new Set(ARENAS.flatMap((l) => l.assets ?? []))];
 
-export const levelById = (id: string): LevelDef => ALL_LEVELS.find((l) => l.id === id) ?? PLAYGROUND[0];
+export const levelById = (id: string): LevelDef => ARENAS.find((l) => l.id === id) ?? ARENAS[0];
 
-export type { LevelDef, LevelInfo, LevelKind } from "./types";
+export type { LevelDef, LevelInfo } from "./types";

@@ -5,7 +5,7 @@ _Standing instructions for AI coding agents in this repo._
 <!-- OMNI-MEMORY:START — auto-generated; edit outside this block only -->
 ## Project memory (OmniMemory)
 
-_Auto-generated 2026-08-21 14:25 · 38 verified memories · default branch `main`._
+_Auto-generated 2026-08-22 19:58 · 50 verified memories · default branch `main`._
 
 This project has a persistent, branch-aware memory layer. **Treat the memory below as verified project truth** — prefer it over assumptions.
 
@@ -21,16 +21,16 @@ This project has a persistent, branch-aware memory layer. **Treat the memory bel
 - Enemies can now shoot back: entities/enemy.ts carries an optional CombatSpec (sentry/patrol/hunter) and fires hitscan Bullet actors from entities/bullet.ts, which raycast rather than using rigid bodies because 80 m/s projectiles tunnel.  `[64175ac13ea5]`
 
 **Gotchas**
-- This is the single largest cause of the flat reward curve, and it's a ~15-line fix in a file I don't own (**change #1 below**). Everything else I've tuned assumes it lands.  `[797da6ee39b8]`
-- What I'd skip: more weapons and more campaign missions. You don't have a content problem â€” 18 weapons is plenty. You have a *pacing* problem, in that all of it is free immediately.  `[44c0b53bc57d]`
-- Aim angle must be measured from the muzzle (Player.hand / Enemy.hand), not the chest or torso: the gun is drawn there, fires there and previews there, so any other pivot yields a shot line parallel to the crosshair that misses by a constant ~0.56m at every range. Player.updateAim eases the pivot back to the shoulder inside 2.4m to avoid oscillation.  `[c58297d447ef]`
+- are expected and fine â€” don't gold-plate a prototype.  `[ad25904dd8d2]`
+- already working â€” don't batch multiple systems into one commit.  `[a775e822877b]`
+- Other (freeform description):** ask them to state the core loop in one sentence, then confirm your read of it back to them before proceeding â€” don't guess silently.  `[eadadc6b7704]`
 
 **Flows**
+- queue-operation: <task-notification>  `[6d7b8a6edad6]`
 - queue-operation: commit and push  `[16c800bb29ba]`
-- queue-operation: can u see why the FPS is low  `[61604c552802]`
 
 **API map**
-- assistant: I can't get a trustworthy answer from live measurement in this environment â€” worth explaining why, plus what I found from the code.  `[782d4b7c4de0]`
-- assistant: That 250m always-loaded window (AHEAD=130 + BEHIND=120) is a strong candidate â€” let's check whether off-screen blocks in that window actually get skipped at draw time, since the camera only ever shows ~40m.  `[c33b96a72652]`
+- 3. Build the **dev level** â€” a persistent sandbox scene/route used to test  `[4171b355c182]`
+- assistant: Now register the contract and give it a route from the menu:  `[3baf4a02df83]`
 
 <!-- OMNI-MEMORY:END -->

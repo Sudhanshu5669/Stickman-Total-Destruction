@@ -48,17 +48,7 @@ export interface HudState {
    */
   touch?: boolean;
 
-  // ------------------------------------------------------------- run mode
-  mode: "playground" | "campaign" | "endless";
-  /** Campaign: knockouts left before the mission fails. */
-  lives: number;
-  /** Campaign: the mission's one-line brief, shown while the intro card is up. */
-  briefing: string;
-  /** Endless: metres travelled from the start. */
-  distance: number;
-  /** Endless: best distance this session. */
-  bestDistance: number;
-  /** Endless: enemies killed this run. */
+  /** Hostiles put down this session. */
   kills: number;
 }
 
@@ -121,7 +111,6 @@ export class Hud {
     if (!narrow) this.drawWeaponBanner(ctx, w, scale, s, dt);
     this.drawAmmoBar(ctx, w, h, scale, s, dt, narrow, touch);
     this.drawCombo(ctx, w, h, scale, s, narrow);
-    if (s.hintAlpha > 0.01 && s.briefing) this.drawBriefing(ctx, w, h, scale, s);
     if (s.down && !s.paused) this.drawDownBanner(ctx, w, h, scale, s);
     // The pause overlay belongs to Menu — it owns the clickable buttons.
     if (s.showDebug) this.drawDebug(ctx, w, h, scale, s);
@@ -225,29 +214,18 @@ export class Hud {
 
     // Each row: text, size, weight, colour, outline.
     const rows: [string, number, number, string, string?][] = [];
-    if (s.mode === "endless") {
-      rows.push([`${Math.floor(s.distance)}m`, 22 * k, 900, CREAM, "rgba(0,0,0,0.6)"]);
-      rows.push([`BEST ${Math.floor(s.bestDistance)}m`, 10 * k, 800, "rgba(244,241,232,0.5)"]);
-      rows.push([`${s.kills} DOWN · ${s.blocksDestroyed} SMASHED`, 10 * k, 800, "rgba(255,210,63,0.72)"]);
-    } else {
-      rows.push([`${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, 22 * k, 900, CREAM, "rgba(0,0,0,0.6)"]);
-      rows.push([s.mode === "campaign" ? "HOSTILES DOWN" : "STICKMEN DOWN", 10 * k, 800, "rgba(244,241,232,0.5)"]);
-      rows.push([`${s.blocksDestroyed} BLOCKS SMASHED`, 10 * k, 800, "rgba(255,210,63,0.72)"]);
-    }
+    rows.push([`${s.enemiesTotal - s.enemiesLeft}/${s.enemiesTotal}`, 22 * k, 900, CREAM, "rgba(0,0,0,0.6)"]);
+    rows.push(["STICKMEN DOWN", 10 * k, 800, "rgba(244,241,232,0.5)"]);
+    rows.push([`${s.blocksDestroyed} BLOCKS SMASHED`, 10 * k, 800, "rgba(255,210,63,0.72)"]);
     // The level name is the least useful thing in the panel and the first to go when
     // there is no room for it.
     if (!narrow) rows.push([s.levelName.toUpperCase(), 10 * k, 800, "rgba(244,241,232,0.32)"]);
 
-    const pipR = 5 * k;
-    const pipStep = pipR * 2.8;
-    // Five pips plus the LIVES label; the row is often the widest thing in the panel.
-    const pipsW = s.mode === "campaign" ? 5 * pipStep + measure(ctx, "LIVES", 10 * k, 800) + 8 * k : 0;
-
-    let content = pipsW;
+    let content = 0;
     for (const [str, size, weight] of rows) content = Math.max(content, measure(ctx, str, size, weight));
 
     const bw = content + pad * 2;
-    const bh = rows.length * rowGap + (s.mode === "campaign" ? 26 * k : 0) + 22 * k;
+    const bh = rows.length * rowGap + 22 * k;
     const left = right - bw;
     panel(ctx, left, y - 8 * k, bw, bh, k, 0.34);
 
@@ -259,17 +237,6 @@ export class Hud {
       ty += rowGap;
     }
 
-    // Lives, as pips under the readout. Campaign only — nothing else can be failed.
-    if (s.mode === "campaign") {
-      const py = ty + 2 * k;
-      for (let i = 0; i < 5; i++) {
-        ctx.fillStyle = i < s.lives ? "#e8433a" : "rgba(255,255,255,0.14)";
-        ctx.beginPath();
-        ctx.arc(tx - pipR - i * pipStep, py, pipR, 0, TAU);
-        ctx.fill();
-      }
-      text(ctx, "LIVES", tx - 5 * pipStep - 6 * k, py + 3.5 * k, 10 * k, "rgba(244,241,232,0.45)", "right", "alphabetic", 800);
-    }
   }
 
   /**
@@ -492,29 +459,6 @@ export class Hud {
     ctx.scale(pop, pop);
     text(ctx, `x${s.combo}`, 0, -2 * k, (narrow ? 38 : 46) * k, GOLD, "center", "middle", 900, "rgba(0,0,0,0.75)");
     text(ctx, "CHAIN", 0, 24 * k, 11 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.75)");
-    ctx.restore();
-  }
-
-  /**
-   * The mission brief, for the few seconds before the player starts playing.
-   *
-   * All that survives of the old intro card. It is one line, it is placed high enough
-   * to leave the stickman and the coach's first prompt unobstructed, and it never
-   * needs dismissing.
-   */
-  private drawBriefing(ctx: Ctx, w: number, h: number, k: number, s: HudState) {
-    ctx.save();
-    ctx.globalAlpha = s.hintAlpha;
-    const size = 16 * k;
-    const bw = Math.min(measure(ctx, s.briefing, size, 800) + 44 * k, w - 40 * k);
-    const bh = 40 * k;
-    const x = w / 2 - bw / 2;
-    const y = h * 0.16;
-    panel(ctx, x, y, bw, bh, k, 0.62);
-    ctx.fillStyle = GOLD;
-    roundRect(ctx, x + 8 * k, y + 10 * k, 3 * k, bh - 20 * k, 1.5 * k);
-    ctx.fill();
-    text(ctx, s.briefing, w / 2, y + bh / 2 + 1 * k, size, CREAM, "center", "middle", 800);
     ctx.restore();
   }
 

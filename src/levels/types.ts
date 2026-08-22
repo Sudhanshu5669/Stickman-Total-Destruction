@@ -3,6 +3,13 @@ import type { Enemy } from "../entities/enemy";
 import type { V } from "../core/math";
 import type { Builder } from "./builder";
 
+/**
+ * What a built arena hands back to the game.
+ *
+ * Deliberately small. The previous version carried an endless-mode streaming director
+ * and a completion callback, because levels used to be able to be *won*. Arenas cannot
+ * be won — you leave when you are bored — so neither exists any more.
+ */
 export interface LevelInfo {
   spawn: V;
   /** World X limits the player is kept inside. */
@@ -11,73 +18,41 @@ export interface LevelInfo {
   /** Ground height at the spawn. */
   groundY: number;
   /**
-   * Endless mode only: the streaming director, so the HUD can read how far the run
-   * has gone and the game can tell it about kills.
+   * Optional ceiling, metres. The vertical and bowl arenas set it so the jetpack has a
+   * roof to bump against instead of an infinite sky to climb out of the level through.
    */
-  director?: { distance: number; kills: number; countKill(): void };
-
-  /**
-   * Called once, on the frame the last hostile drops.
-   *
-   * Its presence hands completion to the level: the game stops running its own win
-   * timer and waits for `complete()`. That is what lets a contract put a beat between
-   * the last kill and the results card — a reward to walk to, a building to watch fall
-   * — instead of cutting to a card the instant the map goes quiet.
-   */
-  onCleared?(game: GameCtx, complete: () => void): void;
+  ceiling?: number;
 }
 
-/** Which of the three front-end modes a level belongs to. */
-export type LevelKind = "playground" | "campaign" | "endless";
-
+/**
+ * An arena.
+ *
+ * Every field that used to encode *run rules* — loadout, lives, briefing, mission order,
+ * whether the jetpack was confiscated, which cutscene played first — is gone. There is
+ * one mode now, and its rules are the same everywhere: you have what you have unlocked,
+ * you cannot lose, and nothing is explained to you in prose.
+ */
 export interface LevelDef {
   id: string;
-  /** Defaults to "playground" — the free-play worlds reachable from the menu. */
-  kind?: LevelKind;
   name: string;
+  /** One line on the arena card. Flavour, never instruction. */
   tagline: string;
   /** Key into `THEMES`. */
   theme: string;
   /** Metres per second squared, negative. Earth is -26 here (punchier than real). */
   gravity: number;
-  /** Short modifier labels for the menu card, e.g. "LOW GRAVITY". */
+  /** Short modifier labels for the arena card, e.g. "LOW GRAVITY". */
   tags: string[];
-  /** Menu card accent colour. */
+  /** Arena card accent colour. */
   accent: string;
   build(game: GameCtx, b: Builder): LevelInfo;
   /**
-   * Sprite sheets, by path under `src/Assets`, that must be decoded before `build`
-   * runs. Only the tileset world sets this; boot preloads the union across all levels
-   * and never blocks on a failure.
+   * Sprite sheets, by path under `src/Assets`, that must be decoded before `build` runs.
+   * Boot preloads the union across all arenas and never blocks on a failure.
    */
   assets?: readonly string[];
-  /**
-   * A building to sketch on this level's menu card, for worlds whose look lives in a
-   * tileset rather than in their theme's palette. Source rect in tiles.
-   */
+  /** A slice of tileset art to paint this arena's menu card with. Source rect in tiles. */
   thumbArt?: { path: string; tx: number; ty: number; tw: number; th: number };
   /** Optional persistent world hazard, e.g. acid rain. */
   hazard?(game: GameCtx): Actor;
-
-  // ------------------------------------------------------------- run rules
-  /**
-   * Ammo ids the player is issued, in HUD order. Omit for the full arsenal.
-   * Campaign missions use this to hand out the toys a mission is designed around.
-   */
-  loadout?: string[];
-  /** Whether the god-mode cheat is available. Campaign missions say no. */
-  allowGod?: boolean;
-  /** Campaign: knockouts allowed before the mission is failed. */
-  lives?: number;
-  /** Campaign: the one-line brief shown on the mission card and at the start. */
-  briefing?: string;
-  /** Campaign: display order, 1-based. */
-  order?: number;
-  /**
-   * Takes the jetpack away for this level. Story equipment is only meaningful if
-   * something is built around not having it — see `CONTRACT_1`.
-   */
-  noJetpack?: boolean;
-  /** Cutscene to play before the first attempt. Only ever shown once; always skippable. */
-  intro?: "awakening";
 }
