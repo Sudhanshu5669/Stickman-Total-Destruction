@@ -12,7 +12,7 @@ import { Background } from "./render/background";
 import { THEMES, type Theme } from "./render/theme";
 import { rgba, type Ctx } from "./render/draw";
 import { Player } from "./entities/player";
-import { Enemy, alertNearby } from "./entities/enemy";
+import { Enemy, alertNearby, resetSquad } from "./entities/enemy";
 import { Block, Debris } from "./entities/block";
 import { Hud, type HudState } from "./ui/hud";
 import { Menu, type MenuAction } from "./ui/menu";
@@ -191,6 +191,11 @@ export class Game implements GameCtx {
     this.fire.clear();
     // These hold owners from the world about to be thrown away.
     this.wet.clear();
+
+    // Contacts and the enemy roster must not survive into a world that no longer
+    // exists — a stale sighting would have the new level's garrison walk to a spot
+    // the player stood in on the old one.
+    resetSquad();
 
     this.levelDef = def;
     this.theme = THEMES[def.theme] ?? THEMES.day;

@@ -60,10 +60,33 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   const G0 = 0;
   void game;
 
-  // One continuous slab. The Proving Ground deliberately has no gaps, no water and no
-  // hazard: anything that can kill you while you are trying to look at something else
-  // makes it a worse instrument.
-  b.skin(b.ground(-46, G0 - 3, 170, 6), { sheet: b.sheet(FLOOR), tx: 0, ty: 0 });
+  // One continuous slab, spanning x -50..125 — everything the arena uses, plus slack.
+  //
+  // NOTE `ground(x, y, w, h)` places a slab by its **centre**, not its bottom-left
+  // corner (see `Terrain`). Reading it as a corner is what left bands 5 and 6 of this
+  // arena standing over a void, with every stickman in them quietly falling out of the
+  // world while the anchored props hung in the air looking fine.
+  const GROUND_X0 = -50;
+  const GROUND_X1 = 125;
+  b.skin(
+    b.ground((GROUND_X0 + GROUND_X1) / 2, G0 - 3, GROUND_X1 - GROUND_X0, 6),
+    { sheet: b.sheet(FLOOR), tx: 0, ty: 0 },
+  );
+
+  // ------------------------------------------------------- band 0: crouch cover
+  // The only geometry in the arena that tests ducking, and it needs its own clear lane.
+  //
+  // A full-height wall gives *binary* cover: an enemy is either already behind one or
+  // would have to walk through it to get behind it, so no amount of searching can change
+  // its situation. A low parapet is the shape that works — the gunner stands beside it
+  // in the open, and dropping below it is both reachable and effective. See
+  // `Enemy.crouch` and `CHEST_CROUCH`.
+  //
+  // Placed left of the spawn, where nothing else can wander into the sightline. The
+  // first version of this sat at x=78 and was silently blocked by a range marker two
+  // metres further on, which cost an hour of believing the AI was broken.
+  b.block(-40, G0 + 0.55, 3.2, 1.1, "concrete");
+  b.gunner("grunt", -44, G0, 1, { behavior: "patrol", patrol: 2, gun: "rifle" });
 
   // ------------------------------------------------------- band 1: material control
   // Identical stacks, one per material, same size and spacing. Everything about them is
@@ -121,6 +144,7 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   b.wall(69, G0, 3, 6, "brick");                         // a wall to break line of sight
   b.gunner("grunt", 69, G0 + 6, -1, { behavior: "sentry" });
   b.gunner("guard", 72, G0, -1, { gun: "shotgun", behavior: "hunter" });
+
 
   // ------------------------------------------------------- band 6: the long shot
   // Range markers at known distances from the last cover, for measuring camera reach.
