@@ -4,6 +4,7 @@ import { AMMO, AMMO_BY_ID, speedFor, type AmmoDef } from "./ammo";
 import { jitterDir, muzzleSpawn } from "../entities/projectile";
 import { at, disc, poly, rgba, roundBox, shade, type Ctx } from "../render/draw";
 import { drawIcon } from "../render/props";
+import { drawGunSprite, gunSprite, MUZZLE_X } from "../render/gunart";
 import { sfx } from "../fx/audio";
 import { progress } from "../ui/progress";
 
@@ -230,8 +231,56 @@ export class Weapon {
   /** 0..1 while a continuous weapon is running; drives the nozzle glow. */
   streamHeat = 0;
 
-  /** Draws the gun in world space, rotated to `angle` and pivoted at the hand. */
+  /**
+   * Draws the gun in world space, rotated to `angle` and pivoted at the hand.
+   *
+   * Pixel art where there is art, procedural shapes where there is not. The fallback is
+   * not dead code: it is what lets a nineteenth round be added and played with before
+   * anybody has drawn it, and it is what would still be on screen if a future sprite
+   * sheet failed to load.
+   */
   draw(ctx: Ctx, hand: V, angle: number, time: number) {
+    const a = this.ammo;
+    const sprite = gunSprite(a.id, a.tint);
+    if (sprite) {
+      this.drawSprite(ctx, sprite, hand, angle, a.heft);
+      return;
+    }
+    this.drawProcedural(ctx, hand, angle, time);
+  }
+
+  /**
+   * The pixel-art path.
+   *
+   * Scale is driven by `heft` rather than fixed, so the chicken cannon still reads as a
+   * carbine and the nuke launcher as shoulder-mounted artillery — the sprites carry the
+   * character, `heft` carries the weight.
+   */
+  private drawSprite(ctx: Ctx, sprite: HTMLCanvasElement, hand: V, angle: number, heft: number) {
+    const scale = 0.85 + heft * 0.55;
+    const recoilShift = -this.kick * (0.1 + heft * 0.24);
+    at(ctx, hand.x, hand.y, angle, () => {
+      ctx.translate(recoilShift, 0);
+      // 20 source pixels back from the muzzle end is where every grip in the set sits,
+      // so the gun pivots in the hand rather than swinging from its own back end.
+      drawGunSprite(ctx, sprite, 18, scale);
+
+      if (this.flash > 0.02) {
+        const f = this.flash;
+        const mx = MUZZLE_X(scale);
+        ctx.globalAlpha = f;
+        poly(ctx, [
+          [mx, 0], [mx + 0.5 + heft * 1.4, -0.22 - heft * 0.5],
+          [mx + 0.28 + heft * 0.7, 0], [mx + 0.5 + heft * 1.4, 0.22 + heft * 0.5],
+        ], "#fff2c2", null);
+        disc(ctx, mx, 0, (0.16 + heft * 0.34) * f, rgba("#ffd23f", 0.9), null);
+        ctx.globalAlpha = 1;
+      }
+    });
+  }
+
+  /** The original code-drawn gun. Kept as the fallback for any round without art. */
+  private drawProcedural(ctx: Ctx, hand: V, angle: number, time: number) {
     const a = this.ammo;
     const heft = a.heft;
     // Sized against a 1.84m stickman: the light guns read as carbines, the heavy ones

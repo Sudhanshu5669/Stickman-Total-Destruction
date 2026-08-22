@@ -1,0 +1,34 @@
+<!doctype html><meta charset=utf-8><title>Gun contact sheet</title>
+<style>
+ body{background:#5a7a4e;color:#f4f1e8;font:14px "Trebuchet MS",sans-serif;margin:0;padding:24px}
+ h1{font-size:18px;letter-spacing:.08em;margin:0 0 18px}
+ .row{display:flex;align-items:center;gap:14px;padding:6px 0;border-bottom:1px solid #262c38}
+ .name{width:150px;font-weight:800;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:#ffd23f}
+ canvas{image-rendering:pixelated}
+</style>
+<div id=out></div>
+<script type="module">
+import { gunSprite } from "/src/render/gunart.ts";
+import { AMMO } from "/src/weapons/ammo.ts";
+const out = document.getElementById("out");
+out.innerHTML = "<h1>ARSENAL — pixel art contact sheet (4x and 8x)</h1>";
+for (const a of AMMO) {
+  const s = gunSprite(a.id, a.tint);
+  const row = document.createElement("div");
+  row.className = "row";
+  const n = document.createElement("div");
+  n.className = "name"; n.textContent = a.name;
+  row.appendChild(n);
+  if (!s) { row.appendChild(Object.assign(document.createElement("span"),{textContent:"— no art —"})); }
+  else {
+    for (const z of [4, 8]) {
+      const c = document.createElement("canvas");
+      c.width = s.width*z; c.height = s.height*z;
+      const g = c.getContext("2d"); g.imageSmoothingEnabled = false;
+      g.drawImage(s, 0, 0, c.width, c.height);
+      row.appendChild(c);
+    }
+  }
+  out.appendChild(row);
+}
+</script>
