@@ -2,30 +2,51 @@ import { ARENAS } from "../levels";
 import type { LevelDef } from "../levels/types";
 import { clamp, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
+import { THEMES } from "../render/theme";
 import { settings, SHAKE_LABELS } from "./settings";
 import { quality, TIER_LABELS } from "./quality";
 import { progress } from "./progress";
+import { AMMO_BY_ID } from "../weapons/ammo";
 
 /**
  * The front end.
  *
- * One screen. The build this replaced had four — a mode select, a playground grid, a
- * campaign mission ladder and an endless page — plus a result card with a revive offer,
- * a medal shelf and a daily countdown. All of it is gone with the modes it advertised.
+ * One screen: pick an arena, play. The build this replaced had four pages, a result
+ * card, a revive offer, a medal shelf and a daily countdown, all of which advertised
+ * modes that no longer exist.
  *
- * What is left is the only decision the game actually asks the player to make: which
- * arena. Everything else the front end has to do — pause, options — is a small overlay
- * on top of the world, not a page you navigate to.
+ * ## Why it looks like this
  *
- * This is the *functional* version. The visual pass (pixel framing, arena previews
- * painted from the tilesets, a hard palette and chunky type instead of these plain
- * panels) is System 10 in `SYSTEMS.md`, deliberately scheduled last so the menu
- * advertises the six arenas that will exist by then rather than the one that does now.
+ * The brief was "an actual game, not a website UI, no gradients". Those are the same
+ * instruction stated twice, because the thing that makes canvas UI read as a web page
+ * is almost always the *rendering*, not the layout: soft gradients, rounded corners,
+ * drop shadows and thin grey hairlines. A game menu is built out of the opposite —
+ * flat fills, hard edges, notched corners, a small palette used decisively, and type
+ * heavy enough to be read at a glance from across a room.
+ *
+ * So the rules here, and they are followed without exception:
+ *
+ * 1. **No gradient anywhere.** Every fill is one flat colour. Depth comes from *value*
+ *    — a lighter top edge and a darker bottom edge on the same panel — the same trick
+ *    the weapon sprites use (`render/gunart.ts`), so the UI and the guns are lit from
+ *    the same imaginary light.
+ * 2. **No rounded corners.** Panels are notched instead: the corner pixel is cut out.
+ *    That single detail is most of what separates a pixel-art frame from a CSS card.
+ * 3. **No drop shadows.** Separation is a one-pixel ink outline, again as the guns do.
+ * 4. **The arena previews are painted from the arenas' own art** — theme colours and a
+ *    slice of the tileset each level actually uses — so the card shows the place rather
+ *    than a coloured rectangle with a name on it.
+ * 5. **One accent per arena**, taken from the level definition, so the seven read as
+ *    seven places rather than seven rows of a list.
  */
 
+const INK = "#12151c";
 const CREAM = "#f4f1e8";
 const GOLD = "#ffd23f";
-const INK = "#0e1017";
+const PANEL = "#1b2029";
+const PANEL_LIT = "#2b3340";
+const PANEL_DIM = "#0e1116";
+const MUTED = "rgba(244,241,232,0.42)";
 
 /** Things the menu handles by itself. `click()` applies them and reports `none`. */
 type UiAction =
@@ -50,19 +71,14 @@ interface Region {
 }
 
 export class Menu {
-  /** Index into `ARENAS`. The selected arena is the one playing itself behind the menu. */
   private sel = 0;
   private optionsOpen = false;
   private t = 0;
   private hot = -1;
-
-  /** Hit regions, rebuilt every frame by `draw` and consumed by `click`/`hover`. */
   private regions: Region[] = [];
 
-  /** Latest cursor position, written by the game so `draw` can light up what is under it. */
   readonly lastMouse = { x: -1, y: -1 };
 
-  /** The arena the attract mode should be playing. */
   get previewLevel(): LevelDef {
     return ARENAS[this.sel] ?? ARENAS[0];
   }
@@ -71,7 +87,6 @@ export class Menu {
     this.t += dt;
   }
 
-  /** Keyboard selection. Wraps, because a list of six should not have dead ends. */
   moveSelection(dir: number) {
     const n = ARENAS.length;
     this.sel = (this.sel + Math.sign(dir) + n) % n;
@@ -85,7 +100,6 @@ export class Menu {
     return { kind: "play", level: this.previewLevel };
   }
 
-  /** @returns true when there was something to back out of. */
   back(): boolean {
     return this.closeOptions();
   }
@@ -96,7 +110,6 @@ export class Menu {
     return true;
   }
 
-  /** No-op, kept so `game.ts` can keep its single navigation path while screens are gone. */
   goTo(_screen: string) {}
 
   hover(x: number, y: number) {
@@ -135,137 +148,255 @@ export class Menu {
     this.regions = [];
     const k = clamp(Math.min(w, h) / 780, 0.55, 1.5);
 
-    // The world is already drawn behind this; the scrim is what stops the attract-mode
-    // demo competing with the type for attention.
-    ctx.fillStyle = "rgba(10,12,18,0.62)";
+    // A flat scrim, not a gradient. The attract-mode world plays behind it and has to
+    // be visible enough to be an advert for itself and quiet enough to lose to the type.
+    ctx.fillStyle = "rgba(10,12,18,0.72)";
     ctx.fillRect(0, 0, w, h);
 
-    text(ctx, "STICKMAN ASCENSION", w / 2, h * 0.16, 46 * k, CREAM,
-      "center", "middle", 900, "rgba(0,0,0,0.65)");
-    text(ctx, "PICK SOMETHING TO BREAK", w / 2, h * 0.16 + 34 * k, 13 * k,
-      "rgba(244,241,232,0.5)", "center", "middle", 800);
-
-    this.drawArenaRow(ctx, w, h, k);
+    this.drawTitle(ctx, w, k);
+    const cardsBottom = this.drawArenaRow(ctx, w, h, k);
+    this.drawDetail(ctx, w, h, k, cardsBottom);
     this.drawGearButton(ctx, w, k);
     if (this.optionsOpen) this.drawOptions(ctx, w, h, k);
 
     this.hover(this.lastMouse.x, this.lastMouse.y);
   }
 
-  /** The arena strip. One card per arena, the selected one raised and playing behind. */
-  private drawArenaRow(ctx: Ctx, w: number, h: number, k: number) {
+  /**
+   * The wordmark.
+   *
+   * Two passes offset by a pixel — ink under cream — rather than a shadow. A blurred
+   * shadow is the single most web-looking thing a canvas title can do; a hard offset is
+   * what a sprite-based title would look like, and it costs the same.
+   */
+  private drawTitle(ctx: Ctx, w: number, k: number) {
+    const size = 42 * k;
+    const y = 52 * k;
+    text(ctx, "STICKMAN ASCENSION", w / 2 + 3 * k, y + 3 * k, size, INK, "center", "middle", 900);
+    text(ctx, "STICKMAN ASCENSION", w / 2, y, size, CREAM, "center", "middle", 900);
+    // A rule either side of the subtitle, which reads as chrome rather than as text.
+    const sub = "PICK SOMETHING TO BREAK";
+    const subW = measure(ctx, sub, 12 * k, 800);
+    text(ctx, sub, w / 2, y + 28 * k, 12 * k, GOLD, "center", "middle", 800);
+    ctx.fillStyle = "rgba(255,210,63,0.45)";
+    ctx.fillRect(w / 2 - subW / 2 - 34 * k, y + 27 * k, 24 * k, 2 * k);
+    ctx.fillRect(w / 2 + subW / 2 + 10 * k, y + 27 * k, 24 * k, 2 * k);
+  }
+
+  /**
+   * The seven arena cards.
+   *
+   * One row on a desktop frame, two on a phone. The break is decided by the card width
+   * a single row would produce rather than by a viewport breakpoint: seven across a
+   * 390 px portrait phone is a 47 px card, which is smaller than a fingertip and far
+   * too small to read a name in. Below the threshold the row splits 4 + 3 — the only
+   * balanced split of seven — because a wrap that leaves one orphan card on its own
+   * line reads as a bug rather than as a grid.
+   *
+   * @returns the Y the cards end at, so the detail block can sit under them.
+   */
+  private drawArenaRow(ctx: Ctx, w: number, h: number, k: number): number {
     const n = ARENAS.length;
-    const cardW = Math.min(240 * k, (w - 40 * k) / Math.max(1, n) - 12 * k);
-    const cardH = cardW * 0.62;
-    const gap = 12 * k;
-    const totalW = n * cardW + (n - 1) * gap;
-    const x0 = w / 2 - totalW / 2;
-    const y = h * 0.44;
+    const gap = 10 * k;
+    const maxW = 168 * k;
+    /** Card width if all seven shared one row. */
+    const flat = Math.min(maxW, (w - 48 * k - gap * (n - 1)) / n);
+    const split = flat < 110 * k;
+    const perRow = split ? 4 : n;
+    const cardW = split
+      ? Math.min(maxW, (w - 48 * k - gap * (perRow - 1)) / perRow)
+      : flat;
+    const cardH = cardW * 1.0;
+    const y = h * (split ? 0.16 : 0.2);
+
+    /** Rows are centred one at a time, so the short last row sits under the middle. */
+    const rowOf = (i: number) => Math.floor(i / perRow);
+    const countIn = (row: number) => Math.min(perRow, n - row * perRow);
+    const originOf = (row: number) => {
+      const c = countIn(row);
+      return w / 2 - (c * cardW + (c - 1) * gap) / 2;
+    };
 
     ARENAS.forEach((def, i) => {
-      const x = x0 + i * (cardW + gap);
       const chosen = i === this.sel;
-      const cy = y - (chosen ? 8 * k : 0);
+      const row = rowOf(i);
+      const x = originOf(row) + (i - row * perRow) * (cardW + gap);
+      const lift = chosen ? 6 * k : 0;
+      const cy = y + row * (cardH + gap) - lift;
+      const hot = this.isHot(x, cy, cardW, cardH);
 
-      ctx.fillStyle = chosen ? "rgba(20,24,34,0.94)" : "rgba(14,16,23,0.82)";
-      roundRect(ctx, x, cy, cardW, cardH, 6 * k);
-      ctx.fill();
+      // Frame first, then the preview inset into it.
+      // Chosen cards get an accent *frame*, not an accent fill. Filling the card meant
+      // its own name had to sit on top of a saturated colour, which is the one place
+      // this palette cannot hold contrast.
+      if (chosen) {
+        const o = Math.round(3 * k);
+        notchedPanel(ctx, x - o, cy - o, cardW + o * 2, cardH + o * 2, k, def.accent);
+      }
+      notchedPanel(ctx, x, cy, cardW, cardH, k, hot || chosen ? PANEL_LIT : PANEL);
 
-      ctx.strokeStyle = chosen ? def.accent : "rgba(244,241,232,0.16)";
-      ctx.lineWidth = chosen ? 2.5 * k : 1.2 * k;
-      roundRect(ctx, x, cy, cardW, cardH, 6 * k);
-      ctx.stroke();
+      const pad = 4 * k;
+      const previewH = cardH * 0.56;
+      const thumb = arenaThumb(def);
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(thumb, x + pad, cy + pad, cardW - pad * 2, previewH);
+      ctx.restore();
+      // Ink line under the preview, so the art and the label do not bleed together.
+      ctx.fillStyle = INK;
+      ctx.fillRect(x + pad, cy + pad + previewH, cardW - pad * 2, 2 * k);
 
-      // A band of the arena's own accent, so the six read as six places, not six rows.
+      fitText(ctx, def.name.toUpperCase(), x + cardW / 2, cy + previewH + 22 * k,
+        15 * k, cardW - 12 * k, chosen ? CREAM : "rgba(244,241,232,0.72)", 900);
+
+      // The accent bar is the card's identity, and it is solid for the chosen one and
+      // a stub for the rest — a difference you can see without reading anything.
       ctx.fillStyle = def.accent;
-      ctx.fillRect(x + 10 * k, cy + cardH - 16 * k, cardW - 20 * k, 3 * k);
-
-      fitText(ctx, def.name.toUpperCase(), x + cardW / 2, cy + cardH * 0.4,
-        20 * k, cardW - 24 * k, chosen ? CREAM : "rgba(244,241,232,0.72)", 900);
-      fitText(ctx, def.tagline, x + cardW / 2, cy + cardH * 0.62,
-        11 * k, cardW - 24 * k, "rgba(244,241,232,0.45)", 700);
+      const barW = chosen ? cardW - 20 * k : 18 * k;
+      ctx.fillRect(x + cardW / 2 - barW / 2, cy + cardH - 10 * k, barW, 3 * k);
 
       this.regions.push({ x, y: cy, w: cardW, h: cardH, action: { kind: "select", level: def } });
     });
 
-    // One PLAY button under the strip. The card selects, the button commits — two
-    // separate gestures, so a mis-click on a card never drops you into an arena.
-    const bw = Math.min(300 * k, w - 60 * k);
-    const bh = 52 * k;
-    const bx = w / 2 - bw / 2;
-    const by = y + cardH + 30 * k;
-    const hot = this.isHot(bx, by, bw, bh);
-
-    ctx.fillStyle = hot ? GOLD : "rgba(255,210,63,0.86)";
-    roundRect(ctx, bx, by, bw, bh, 5 * k);
-    ctx.fill();
-    text(ctx, "PLAY", w / 2, by + bh / 2, 24 * k, INK, "center", "middle", 900);
-    this.regions.push({ x: bx, y: by, w: bw, h: bh, action: { kind: "play", level: this.previewLevel } });
-
-    // Carnage, and what it is buying next. The whole progression, in one line.
-    const next = progress.nextUnlock();
-    const line = next
-      ? `${progress.carnage.toLocaleString("en-US")} CARNAGE · ${Math.max(0, next.cost - next.have).toLocaleString("en-US")} TO NEXT ROUND`
-      : `${progress.carnage.toLocaleString("en-US")} CARNAGE · EVERY ROUND UNLOCKED`;
-    text(ctx, line, w / 2, by + bh + 26 * k, 12 * k, "rgba(255,210,63,0.7)", "center", "middle", 800);
+    const rows = Math.ceil(n / perRow);
+    return y + rows * cardH + (rows - 1) * gap;
   }
 
-  private drawGearButton(ctx: Ctx, w: number, k: number) {
-    const r = 20 * k;
-    const cx = w - 30 * k;
-    const cy = 30 * k;
-    const hot = this.isHot(cx - r, cy - r, r * 2, r * 2);
-    drawGear(ctx, cx, cy, r * 0.62, hot);
-    this.regions.push({
-      x: cx - r, y: cy - r, w: r * 2, h: r * 2,
-      action: { kind: "ui", ui: "options" },
+  /** Name, tagline, tags and the PLAY button for whichever arena is selected. */
+  private drawDetail(ctx: Ctx, w: number, h: number, k: number, top: number) {
+    const def = this.previewLevel;
+    let y = top + 34 * k;
+
+    text(ctx, def.name.toUpperCase(), w / 2, y, 26 * k, CREAM, "center", "middle", 900);
+    y += 24 * k;
+    text(ctx, def.tagline, w / 2, y, 13 * k, MUTED, "center", "middle", 700);
+    y += 24 * k;
+
+    // Tags as hard-edged chips in the arena's accent.
+    const chipH = 18 * k;
+    const chipPad = 9 * k;
+    const widths = def.tags.map((t) => measure(ctx, t, 10 * k, 800) + chipPad * 2);
+    const chipGap = 6 * k;
+    let cx = w / 2 - (widths.reduce((a, b) => a + b, 0) + chipGap * (def.tags.length - 1)) / 2;
+    def.tags.forEach((tag, i) => {
+      ctx.fillStyle = INK;
+      ctx.fillRect(cx, y - chipH / 2, widths[i], chipH);
+      ctx.fillStyle = def.accent;
+      ctx.fillRect(cx, y - chipH / 2, widths[i], 2 * k);
+      text(ctx, tag, cx + widths[i] / 2, y + 1 * k, 10 * k, def.accent, "center", "middle", 800);
+      cx += widths[i] + chipGap;
     });
+    y += 34 * k;
+
+    // PLAY.
+    const bw = Math.min(260 * k, w - 80 * k);
+    const bh = 46 * k;
+    const bx = w / 2 - bw / 2;
+    const hot = this.isHot(bx, y, bw, bh);
+    notchedPanel(ctx, bx, y, bw, bh, k, hot ? "#ffdf6a" : GOLD, INK);
+    text(ctx, "PLAY", w / 2, y + bh / 2, 22 * k, INK, "center", "middle", 900);
+    this.regions.push({ x: bx, y, w: bw, h: bh, action: { kind: "play", level: def } });
+    y += bh + 12 * k;
+
+    text(ctx, "← →  CHOOSE      ENTER  PLAY", w / 2, y + 6 * k, 10 * k, MUTED, "center", "middle", 800);
+
+    this.drawUnlockBar(ctx, w, h, k);
   }
 
   /**
-   * Options.
+   * The whole progression, in one bar at the bottom of the screen.
    *
-   * Three controls, and no more than three.
+   * Measured from the previous rung rather than from zero — at six million for the last
+   * round, a bar measured from zero barely twitches over a session and reads as "this is
+   * hopeless" rather than "nearly there". See `progress.nextUnlock`.
+   */
+  private drawUnlockBar(ctx: Ctx, w: number, h: number, k: number) {
+    const next = progress.nextUnlock();
+    const bw = Math.min(420 * k, w - 60 * k);
+    const bx = w / 2 - bw / 2;
+    const by = h - 54 * k;
+
+    if (!next) {
+      text(ctx, `${progress.carnage.toLocaleString("en-US")} CARNAGE · EVERY ROUND UNLOCKED`,
+        w / 2, by + 14 * k, 12 * k, GOLD, "center", "middle", 800);
+      return;
+    }
+
+    const name = (AMMO_BY_ID.get(next.id)?.name ?? next.id).toUpperCase();
+    text(ctx, `NEXT ROUND · ${name}`, bx, by, 11 * k, MUTED, "left", "middle", 800);
+    text(ctx, `${Math.max(0, next.cost - next.have).toLocaleString("en-US")} TO GO`,
+      bx + bw, by, 11 * k, GOLD, "right", "middle", 800);
+
+    const trackH = 10 * k;
+    const ty = by + 12 * k;
+    ctx.fillStyle = INK;
+    ctx.fillRect(bx, ty, bw, trackH);
+    ctx.fillStyle = PANEL_DIM;
+    ctx.fillRect(bx + 1 * k, ty + 1 * k, bw - 2 * k, trackH - 2 * k);
+    // Filled in whole segments rather than a smooth sliver: a bar built out of cells
+    // reads as a game meter, where a continuous one reads as a loading indicator.
+    const cells = 40;
+    const filled = Math.round(clamp(next.frac, 0, 1) * cells);
+    const cellW = (bw - 2 * k) / cells;
+    for (let i = 0; i < filled; i++) {
+      ctx.fillStyle = i === filled - 1 ? "#fff0a8" : GOLD;
+      ctx.fillRect(bx + 1 * k + i * cellW, ty + 1 * k, Math.max(1, cellW - 1 * k), trackH - 2 * k);
+    }
+  }
+
+  /** Carnage total, top right, next to the cog. */
+  private drawGearButton(ctx: Ctx, w: number, k: number) {
+    const total = `${progress.carnage.toLocaleString("en-US")}`;
+    text(ctx, total, w - 62 * k, 30 * k, 15 * k, GOLD, "right", "middle", 900);
+    text(ctx, "CARNAGE", w - 62 * k, 44 * k, 9 * k, MUTED, "right", "middle", 800);
+
+    const r = 17 * k;
+    const cx = w - 32 * k;
+    const cy = 34 * k;
+    const hot = this.isHot(cx - r, cy - r, r * 2, r * 2);
+    drawGear(ctx, cx, cy, r * 0.62, hot);
+    this.regions.push({ x: cx - r, y: cy - r, w: r * 2, h: r * 2, action: { kind: "ui", ui: "options" } });
+  }
+
+  /**
+   * Options. Three controls, and no more than three.
    *
-   * EFFECTS is the one that decides whether the game runs at all on a slow machine, so
-   * it goes first and it says what it costs rather than hiding behind a number. Screen
-   * shake is next because it is an accessibility control rather than a preference —
-   * motion sickness is not a matter of taste. Control tips last, so a returning player
-   * can switch off a tutorial they have already had.
-   *
-   * The volume and mute rows that used to sit in the middle are gone with the audio
-   * (see `fx/audio.ts`).
+   * EFFECTS first because it is the one that decides whether the game runs at all on a
+   * slow machine, and it says what it costs rather than hiding behind a number. Screen
+   * shake next, because it is an accessibility control rather than a preference —
+   * motion sickness is not a matter of taste. Tips last, so a returning player can
+   * switch off a tutorial they have already had.
    */
   private drawOptions(ctx: Ctx, w: number, h: number, k: number) {
-    ctx.fillStyle = "rgba(10,12,18,0.82)";
+    // The panel is modal, so it owns every click on the screen. Dropping the regions
+    // the menu underneath already registered is what makes it modal: `hover` resolves
+    // by *first* match, and the options rows are pushed last, so without this the
+    // controls that happen to sit over the PLAY button hand their clicks to PLAY —
+    // CONTROL TIPS lands exactly on it at a 900-tall frame, and starts the game.
+    this.regions.length = 0;
+
+    ctx.fillStyle = "rgba(8,10,14,0.88)";
     ctx.fillRect(0, 0, w, h);
 
-    const pw = Math.min(420 * k, w - 40 * k);
-    const ph = 320 * k;
+    const pw = Math.min(430 * k, w - 40 * k);
+    const ph = 300 * k;
     const px = w / 2 - pw / 2;
     const py = h / 2 - ph / 2;
+    notchedPanel(ctx, px, py, pw, ph, k, PANEL);
 
-    ctx.fillStyle = "rgba(18,21,30,0.98)";
-    roundRect(ctx, px, py, pw, ph, 8 * k);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(244,241,232,0.18)";
-    ctx.lineWidth = 1.4 * k;
-    roundRect(ctx, px, py, pw, ph, 8 * k);
-    ctx.stroke();
+    text(ctx, "OPTIONS", w / 2, py + 30 * k, 20 * k, CREAM, "center", "middle", 900);
+    ctx.fillStyle = GOLD;
+    ctx.fillRect(px + 20 * k, py + 44 * k, pw - 40 * k, 2 * k);
 
-    text(ctx, "OPTIONS", w / 2, py + 32 * k, 22 * k, CREAM, "center", "middle", 900);
-
-    const rowX = px + 24 * k;
-    const rowW = pw - 48 * k;
-    let ry = py + 68 * k;
+    const rowX = px + 22 * k;
+    const rowW = pw - 44 * k;
+    let ry = py + 70 * k;
 
     ry = this.drawSteps(ctx, rowX, ry, rowW, k, "EFFECTS",
       TIER_LABELS, quality.step, (i) => ({ kind: "ui", ui: "quality", step: i }));
-    // Said plainly, because the tier names alone do not tell a player on a slow laptop
-    // that this is the control that will fix their frame rate.
     text(ctx, "Fewer particles and effects. Turn down if the game stutters.",
-      rowX, ry - 12 * k, 10 * k, "rgba(244,241,232,0.38)", "left", "middle", 700);
-    ry += 6 * k;
+      rowX, ry - 11 * k, 10 * k, MUTED, "left", "middle", 700);
+    ry += 8 * k;
 
     ry = this.drawSteps(ctx, rowX, ry, rowW, k, "SCREEN SHAKE",
       SHAKE_LABELS, settings.shakeStep, (i) => ({ kind: "ui", ui: "shake", step: i }));
@@ -273,36 +404,32 @@ export class Menu {
       { kind: "ui", ui: "tips" });
     void ry;
 
-    const bh = 42 * k;
+    const bh = 40 * k;
     const by = py + ph - bh - 20 * k;
     const hot = this.isHot(rowX, by, rowW, bh);
-    ctx.fillStyle = hot ? GOLD : "rgba(255,210,63,0.8)";
-    roundRect(ctx, rowX, by, rowW, bh, 5 * k);
-    ctx.fill();
-    text(ctx, "CLOSE", w / 2, by + bh / 2, 16 * k, INK, "center", "middle", 900);
+    notchedPanel(ctx, rowX, by, rowW, bh, k, hot ? "#ffdf6a" : GOLD, INK);
+    text(ctx, "CLOSE", w / 2, by + bh / 2, 15 * k, INK, "center", "middle", 900);
     this.regions.push({ x: rowX, y: by, w: rowW, h: bh, action: { kind: "ui", ui: "close" } });
   }
 
-  /** A labelled row of discrete stops. Returns the Y the next row should start at. */
   private drawSteps(
     ctx: Ctx, x: number, y: number, w: number, k: number,
     label: string, labels: readonly string[], current: number,
     action: (i: number) => MenuAction,
   ): number {
-    text(ctx, label, x, y, 12 * k, "rgba(244,241,232,0.6)", "left", "middle", 800);
+    text(ctx, label, x, y, 11 * k, MUTED, "left", "middle", 800);
     const n = labels.length;
-    const gap = 6 * k;
+    const gap = 5 * k;
     const bw = (w - gap * (n - 1)) / n;
-    const bh = 30 * k;
-    const by = y + 16 * k;
+    const bh = 28 * k;
+    const by = y + 15 * k;
     for (let i = 0; i < n; i++) {
       const bx = x + i * (bw + gap);
       const on = i === current;
-      ctx.fillStyle = on ? GOLD : "rgba(244,241,232,0.1)";
-      roundRect(ctx, bx, by, bw, bh, 4 * k);
-      ctx.fill();
-      text(ctx, labels[i], bx + bw / 2, by + bh / 2, 11 * k,
-        on ? INK : "rgba(244,241,232,0.7)", "center", "middle", 800);
+      const hot = this.isHot(bx, by, bw, bh);
+      notchedPanel(ctx, bx, by, bw, bh, k, on ? GOLD : (hot ? PANEL_LIT : PANEL_DIM));
+      text(ctx, labels[i], bx + bw / 2, by + bh / 2, 10 * k,
+        on ? INK : "rgba(244,241,232,0.72)", "center", "middle", 800);
       this.regions.push({ x: bx, y: by, w: bw, h: bh, action: action(i) });
     }
     return by + bh + 22 * k;
@@ -312,23 +439,22 @@ export class Menu {
     ctx: Ctx, x: number, y: number, w: number, k: number,
     label: string, on: boolean, action: MenuAction,
   ): number {
-    const bh = 34 * k;
-    ctx.fillStyle = "rgba(244,241,232,0.06)";
-    roundRect(ctx, x, y, w, bh, 4 * k);
-    ctx.fill();
-    text(ctx, label, x + 12 * k, y + bh / 2, 12 * k, "rgba(244,241,232,0.75)", "left", "middle", 800);
-    text(ctx, on ? "ON" : "OFF", x + w - 12 * k, y + bh / 2, 12 * k,
-      on ? GOLD : "rgba(244,241,232,0.4)", "right", "middle", 900);
+    const bh = 32 * k;
+    const hot = this.isHot(x, y, w, bh);
+    notchedPanel(ctx, x, y, w, bh, k, hot ? PANEL_LIT : PANEL_DIM);
+    text(ctx, label, x + 12 * k, y + bh / 2, 11 * k, "rgba(244,241,232,0.8)", "left", "middle", 800);
+    text(ctx, on ? "ON" : "OFF", x + w - 12 * k, y + bh / 2, 11 * k,
+      on ? GOLD : MUTED, "right", "middle", 900);
     this.regions.push({ x, y, w, h: bh, action });
     return y + bh + 16 * k;
   }
 
-  /** The pause overlay. Drawn over the live world, which keeps settling behind it. */
+  /** The pause overlay, drawn over the live world, which keeps settling behind it. */
   drawPause(ctx: Ctx, w: number, h: number, levelName: string) {
     this.regions = [];
     const k = clamp(Math.min(w, h) / 780, 0.55, 1.5);
 
-    ctx.fillStyle = "rgba(10,12,18,0.72)";
+    ctx.fillStyle = "rgba(8,10,14,0.76)";
     ctx.fillRect(0, 0, w, h);
 
     if (this.optionsOpen) {
@@ -337,9 +463,9 @@ export class Menu {
       return;
     }
 
-    text(ctx, "PAUSED", w / 2, h * 0.3, 40 * k, CREAM, "center", "middle", 900, "rgba(0,0,0,0.6)");
-    text(ctx, levelName.toUpperCase(), w / 2, h * 0.3 + 30 * k, 12 * k,
-      "rgba(244,241,232,0.45)", "center", "middle", 800);
+    text(ctx, "PAUSED", w / 2 + 3 * k, h * 0.28 + 3 * k, 38 * k, INK, "center", "middle", 900);
+    text(ctx, "PAUSED", w / 2, h * 0.28, 38 * k, CREAM, "center", "middle", 900);
+    text(ctx, levelName.toUpperCase(), w / 2, h * 0.28 + 28 * k, 11 * k, GOLD, "center", "middle", 800);
 
     const buttons: [string, MenuAction, boolean][] = [
       ["RESUME", { kind: "resume" }, true],
@@ -347,38 +473,212 @@ export class Menu {
       ["OPTIONS", { kind: "ui", ui: "options" }, false],
       ["LEAVE", { kind: "quit" }, false],
     ];
-    const bw = Math.min(280 * k, w - 60 * k);
-    const bh = 44 * k;
-    let by = h * 0.44;
+    const bw = Math.min(250 * k, w - 60 * k);
+    const bh = 40 * k;
+    let by = h * 0.42;
     for (const [label, action, primary] of buttons) {
       const bx = w / 2 - bw / 2;
       const hot = this.isHot(bx, by, bw, bh);
-      ctx.fillStyle = primary
-        ? (hot ? GOLD : "rgba(255,210,63,0.86)")
-        : (hot ? "rgba(244,241,232,0.18)" : "rgba(244,241,232,0.08)");
-      roundRect(ctx, bx, by, bw, bh, 5 * k);
-      ctx.fill();
-      text(ctx, label, w / 2, by + bh / 2, 15 * k, primary ? INK : CREAM, "center", "middle", 900);
+      notchedPanel(ctx, bx, by, bw, bh, k,
+        primary ? (hot ? "#ffdf6a" : GOLD) : (hot ? PANEL_LIT : PANEL), primary ? INK : undefined);
+      text(ctx, label, w / 2, by + bh / 2, 14 * k, primary ? INK : CREAM, "center", "middle", 900);
       this.regions.push({ x: bx, y: by, w: bw, h: bh, action });
-      by += bh + 10 * k;
+      by += bh + 8 * k;
     }
 
     this.hover(this.lastMouse.x, this.lastMouse.y);
   }
 
-  /** True when the cursor is inside this rect. Read *before* the region is pushed. */
   private isHot(x: number, y: number, w: number, h: number) {
     const m = this.lastMouse;
     return m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h;
   }
 }
 
-// ------------------------------------------------------------------ helpers
+// ------------------------------------------------------------------ chrome
 
-function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), r);
+/**
+ * A hard-edged panel with its corners notched out and its top edge lit.
+ *
+ * This one function is most of the reason the menu does not look like a web page.
+ * `roundRect` + a shadow reads as a card; a notched rectangle with a one-pixel ink
+ * border and a lighter top edge reads as a sprite. Both are four lines of code.
+ */
+function notchedPanel(
+  ctx: Ctx, x: number, y: number, w: number, h: number, k: number,
+  fill: string, inkOverride?: string,
+) {
+  const n = Math.max(2, Math.round(3 * k)); // notch size, in whole pixels
+  const ink = inkOverride ?? INK;
+
+  ctx.fillStyle = ink;
+  ctx.fillRect(x + n, y, w - n * 2, h);
+  ctx.fillRect(x, y + n, w, h - n * 2);
+
+  const i = Math.max(1, Math.round(k));
+  ctx.fillStyle = fill;
+  ctx.fillRect(x + n + i, y + i, w - n * 2 - i * 2, h - i * 2);
+  ctx.fillRect(x + i, y + n + i, w - i * 2, h - n * 2 - i * 2);
+
+  // Value, not gradient: one lit row along the top, one dark row along the bottom.
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillRect(x + n + i, y + i, w - n * 2 - i * 2, i);
+  ctx.fillStyle = "rgba(0,0,0,0.28)";
+  ctx.fillRect(x + n + i, y + h - i * 2, w - n * 2 - i * 2, i);
 }
+
+// ------------------------------------------------------------------ previews
+
+const THUMB_W = 240;
+const THUMB_H = 132;
+const thumbs = new Map<string, HTMLCanvasElement>();
+
+/**
+ * A painted preview of an arena, built from that arena's own theme and its `shape`.
+ *
+ * Flat bands — sky, two ridges — then the arena's silhouette drawn out of ground slabs
+ * and accent-coloured structures, and a black stickman for scale. No gradients, so it
+ * matches the rest of the frame; and because the colours come from the same theme the
+ * level loads, an arena that is repainted repaints its own card.
+ *
+ * Cached forever: seven small canvases, built once on the first frame of the menu.
+ */
+function arenaThumb(def: LevelDef): HTMLCanvasElement {
+  const hit = thumbs.get(def.id);
+  if (hit) return hit;
+
+  const c = document.createElement("canvas");
+  c.width = THUMB_W;
+  c.height = THUMB_H;
+  const g = c.getContext("2d")!;
+  const th = THEMES[def.theme] ?? THEMES.day;
+
+  // Sky. A painted backdrop names its own flat colour; otherwise take the middle stop
+  // of the gradient, which is the one the horizon actually sits against.
+  g.fillStyle = th.sprites?.sky ?? th.sky[1];
+  g.fillRect(0, 0, THUMB_W, THUMB_H);
+  g.fillStyle = th.hillFar;
+  g.fillRect(0, THUMB_H * 0.42, THUMB_W, THUMB_H);
+  g.fillStyle = th.hillNear;
+  g.fillRect(0, THUMB_H * 0.56, THUMB_W, THUMB_H);
+
+  const base = Math.round(THUMB_H * 0.78);
+  const solid = th.groundTop;
+  const deep = th.ground;
+
+  /** A block of ground, with its lit top surface. Every shape is made of these. */
+  const slab = (x: number, y: number, w: number, h: number) => {
+    g.fillStyle = deep;
+    g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+    g.fillStyle = solid;
+    g.fillRect(Math.round(x), Math.round(y), Math.round(w), 4);
+  };
+  /** A structure standing on the ground, in the arena's accent. */
+  const build_ = (x: number, y: number, w: number, h: number, tint = def.accent) => {
+    g.fillStyle = INK;
+    g.fillRect(Math.round(x) - 1, Math.round(y - h) - 1, Math.round(w) + 2, Math.round(h) + 2);
+    g.fillStyle = tint;
+    g.fillRect(Math.round(x), Math.round(y - h), Math.round(w), Math.round(h));
+    g.fillStyle = "rgba(255,255,255,0.16)";
+    g.fillRect(Math.round(x), Math.round(y - h), Math.round(w), 3);
+  };
+
+  // The silhouette. This is the whole point of the card: seven arenas that mostly share
+  // a tileset are told apart by the shape of their ground, not by their scenery.
+  switch (def.shape) {
+    case "tower":
+      slab(0, base, THUMB_W, THUMB_H - base);
+      build_(THUMB_W * 0.42, base, 34, 84);
+      build_(THUMB_W * 0.66, base, 24, 44);
+      build_(THUMB_W * 0.18, base, 18, 22);
+      break;
+
+    case "bowl": {
+      // Rims, then three terraces a side stepping down to a floor.
+      slab(0, base - 34, THUMB_W * 0.2, THUMB_H);
+      slab(THUMB_W * 0.8, base - 34, THUMB_W * 0.2, THUMB_H);
+      for (let i = 0; i < 3; i++) {
+        const y = base - 24 + i * 8;
+        const inset = THUMB_W * (0.2 + i * 0.045);
+        slab(inset, y, THUMB_W * 0.055, THUMB_H);
+        slab(THUMB_W - inset - THUMB_W * 0.055, y, THUMB_W * 0.055, THUMB_H);
+      }
+      slab(THUMB_W * 0.335, base, THUMB_W * 0.33, THUMB_H - base);
+      build_(THUMB_W * 0.46, base, 20, 18);
+      break;
+    }
+
+    case "islands": {
+      // A chain climbing to the right, over nothing.
+      const xs = [0.04, 0.26, 0.47, 0.68, 0.88];
+      xs.forEach((fx, i) => {
+        const w = THUMB_W * 0.16;
+        const y = base - i * 9;
+        slab(THUMB_W * fx, y, w, 11);
+        if (i % 2 === 1) build_(THUMB_W * fx + w * 0.3, y, 12, 20);
+      });
+      break;
+    }
+
+    case "city": {
+      slab(0, base, THUMB_W, THUMB_H - base);
+      const hs = [46, 70, 54, 88, 62, 40];
+      hs.forEach((hh, i) => {
+        const w = 26;
+        const x = 12 + i * (w + 8);
+        build_(x, base, w, hh);
+        // Lit windows, which is the one thing that says "city" instantly.
+        g.fillStyle = "rgba(255,214,140,0.85)";
+        for (let r = 0; r < Math.floor(hh / 14); r++) {
+          g.fillRect(x + 5, base - hh + 8 + r * 14, 5, 5);
+          g.fillRect(x + 15, base - hh + 8 + r * 14, 5, 5);
+        }
+      });
+      break;
+    }
+
+    case "layered": {
+      // Three plateaus rising to a keep, each with its wall.
+      slab(0, base, THUMB_W * 0.42, THUMB_H - base);
+      slab(THUMB_W * 0.38, base - 18, THUMB_W * 0.3, THUMB_H);
+      slab(THUMB_W * 0.64, base - 36, THUMB_W * 0.36, THUMB_H);
+      build_(THUMB_W * 0.2, base, 16, 30);
+      build_(THUMB_W * 0.46, base - 18, 18, 38);
+      build_(THUMB_W * 0.74, base - 36, 30, 52);
+      break;
+    }
+
+    default: {
+      // Flat: a long ground line with a spread of structures along it, which is exactly
+      // what those arenas are.
+      slab(0, base, THUMB_W, THUMB_H - base);
+      build_(THUMB_W * 0.1, base, 20, 26);
+      build_(THUMB_W * 0.34, base, 28, 40);
+      build_(THUMB_W * 0.56, base, 16, 20);
+      build_(THUMB_W * 0.76, base, 32, 52);
+      break;
+    }
+  }
+
+  // The cast, for scale. Two pixels wide and unmistakable.
+  g.fillStyle = "#0a0c11";
+  const sx = Math.round(THUMB_W * 0.06);
+  const sy = def.shape === "bowl" ? base - 34 : base;
+  g.fillRect(sx - 2, sy - 14, 5, 5);
+  g.fillRect(sx - 1, sy - 9, 3, 6);
+  g.fillRect(sx - 3, sy - 3, 3, 4);
+  g.fillRect(sx + 1, sy - 3, 3, 4);
+
+  // Vignette by value, in flat bands — no gradient.
+  g.fillStyle = "rgba(10,12,18,0.18)";
+  g.fillRect(0, 0, THUMB_W, 5);
+  g.fillRect(0, THUMB_H - 5, THUMB_W, 5);
+
+  thumbs.set(def.id, c);
+  return c;
+}
+
+// ------------------------------------------------------------------ helpers
 
 const fontOf = (size: number, weight: number) =>
   `${weight} ${size}px "Trebuchet MS", "Segoe UI", system-ui, sans-serif`;
@@ -388,7 +688,6 @@ function measure(ctx: Ctx, str: string, size: number, weight: number) {
   return ctx.measureText(str).width;
 }
 
-/** Text that shrinks rather than overflowing. */
 function fitText(
   ctx: Ctx, str: string, x: number, y: number, size: number, maxW: number,
   color: string, weight = 800,
@@ -403,8 +702,8 @@ function drawGear(ctx: Ctx, cx: number, cy: number, r: number, hot: boolean) {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.strokeStyle = hot ? CREAM : "rgba(244,241,232,0.6)";
-  ctx.lineWidth = r * 0.26;
-  ctx.lineCap = "round";
+  ctx.lineWidth = r * 0.28;
+  ctx.lineCap = "butt";
   for (let i = 0; i < 6; i++) {
     const a = (i * TAU) / 6;
     ctx.beginPath();

@@ -193,6 +193,6 @@ export const PROVING: LevelDef = {
   tags: ["OPEN", "EVERY TOY"],
   accent: "#ffd23f",
   assets: PROVING_ASSETS,
-  thumbArt: { path: HOUSE, tx: 1, ty: 0, tw: 5, th: 7 },
+  shape: "flat",
   build,
 };

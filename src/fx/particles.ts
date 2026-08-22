@@ -40,6 +40,18 @@ export class Particles {
    */
   gravityScale = 1;
 
+  /**
+   * Swallow `popup` text while the attract demo plays behind the menu.
+   *
+   * The demo is meant to be an advert for the game, so the world keeps exploding under
+   * the front end — but its scoring callouts ("FIRST STRIKE", "+40", "3 CHAIN!") are
+   * addressed to a player who isn't there, and they land in the same screen space as the
+   * arena name and tagline. The menu scrim is deliberately only 72% opaque, so bright
+   * gold type at that size reads straight through it and the two screens fight. Debris
+   * and fire are the advert; the numbers are not.
+   */
+  mute = false;
+
   constructor() {
     for (let i = 0; i < MAX; i++) this.pool.push(blank());
   }
@@ -315,6 +327,7 @@ export class Particles {
    * arrives even a frame or two after its impact stops being read as caused by it.
    */
   popup(x: number, y: number, text: string, color = "#ffd23f", size = 0.6, life = 1.0) {
+    if (this.mute) return;
     this.emit("popup", x, y, {
       vy: 4.2, vx: rand(-1, 1) * 0.6, maxLife: clamp(life, 0.6, 1.2),
       size, color, text, drag: 2.6, gravity: -2,

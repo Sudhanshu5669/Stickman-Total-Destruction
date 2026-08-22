@@ -118,6 +118,6 @@ export const SPIRE: LevelDef = {
   tags: ["VERTICAL", "CLIMB IT", "OR DON'T"],
   accent: "#e08a3a",
   assets: SPIRE_ASSETS,
-  thumbArt: { path: HOUSE, tx: 8, ty: 0, tw: 5, th: 7 },
+  shape: "tower",
   build,
 };

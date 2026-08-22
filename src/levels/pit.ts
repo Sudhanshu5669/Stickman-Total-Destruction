@@ -132,6 +132,6 @@ export const PIT: LevelDef = {
   tags: ["BOWL", "IN THE ROUND", "HIGH GROUND"],
   accent: "#6ab04a",
   assets: PIT_ASSETS,
-  thumbArt: { path: OTHER, tx: 0, ty: 0, tw: 4, th: 4 },
+  shape: "bowl",
   build,
 };

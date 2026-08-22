@@ -283,6 +283,7 @@ export class Game implements GameCtx {
   private enterLevel(def: LevelDef) {
     this.bankRun();
     this.mode = "playing";
+    this.particles.mute = false;
     this.demo = null;
     this.paused = false;
     this.hintAlpha = 1;
@@ -307,6 +308,8 @@ export class Game implements GameCtx {
     this.touch.release();
     this.mode = "menu";
     this.paused = false;
+    // The attract demo scores as it plays; its callouts would land on the menu type.
+    this.particles.mute = true;
     this.loadLevel(this.menu.previewLevel);
     this.demo = new DemoDriver(this);
     this.demo.reset(this.level.spawn);

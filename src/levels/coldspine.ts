@@ -148,6 +148,6 @@ export const COLDSPINE: LevelDef = {
   tags: ["FORTRESS", "LAYERED", "SNOW"],
   accent: "#8fc6e8",
   assets: COLDSPINE_ASSETS,
-  thumbArt: { path: HOUSE, tx: 1, ty: 2, tw: 5, th: 5 },
+  shape: "layered",
   build,
 };

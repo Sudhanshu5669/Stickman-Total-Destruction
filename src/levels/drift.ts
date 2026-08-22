@@ -134,6 +134,6 @@ export const DRIFT: LevelDef = {
   tags: ["ISLANDS", "LOW GRAVITY", "LONG WAY DOWN"],
   accent: "#4cc8e0",
   assets: DRIFT_ASSETS,
-  thumbArt: { path: HOUSE, tx: 1, ty: 0, tw: 5, th: 7 },
+  shape: "islands",
   build,
 };

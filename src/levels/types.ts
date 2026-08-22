@@ -51,8 +51,16 @@ export interface LevelDef {
    * Boot preloads the union across all arenas and never blocks on a failure.
    */
   assets?: readonly string[];
-  /** A slice of tileset art to paint this arena's menu card with. Source rect in tiles. */
-  thumbArt?: { path: string; tx: number; ty: number; tw: number; th: number };
+  /**
+   * The arena's silhouette, for its menu card.
+   *
+   * The card's job is to answer "how is this one different", and for these seven the
+   * answer is almost always the *shape of the ground* — a tower, a pit, a chain of
+   * islands, a street. Cards built only from a slice of tileset showed five near
+   * identical houses, because five of the arenas legitimately use the same house
+   * tileset. Drawing the shape instead makes each card say what its arena is.
+   */
+  shape?: "flat" | "tower" | "bowl" | "islands" | "city" | "layered";
   /** Optional persistent world hazard, e.g. acid rain. */
   hazard?(game: GameCtx): Actor;
 }

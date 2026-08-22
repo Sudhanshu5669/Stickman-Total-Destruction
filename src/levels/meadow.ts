@@ -150,6 +150,6 @@ export const MEADOW: LevelDef = {
   tags: ["OPEN", "ARTILLERY", "LONG SHOTS"],
   accent: "#8fbf4a",
   assets: MEADOW_ASSETS,
-  thumbArt: { path: HOUSE, tx: 1, ty: 2, tw: 5, th: 5 },
+  shape: "flat",
   build,
 };

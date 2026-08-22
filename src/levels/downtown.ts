@@ -148,6 +148,6 @@ export const DOWNTOWN: LevelDef = {
   tags: ["STREET", "DENSE", "ROOFTOPS"],
   accent: "#e0574c",
   assets: DOWNTOWN_ASSETS,
-  thumbArt: { path: BUILD, tx: 1, ty: 4, tw: 6, th: 2 },
+  shape: "city",
   build,
 };
