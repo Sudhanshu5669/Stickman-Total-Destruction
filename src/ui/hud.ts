@@ -3,6 +3,7 @@ import { clamp, damp, lerp, TAU } from "../core/math";
 import { rgba, type Ctx } from "../render/draw";
 import type { Weapon } from "../weapons/weapon";
 import { keyLabel } from "../core/keylabel";
+import { notchedPanel, cellBar, PANEL_DIM, PANEL } from "./chrome";
 
 export interface HudState {
   hp: number;
@@ -52,7 +53,6 @@ export interface HudState {
   kills: number;
 }
 
-const INK = "#0e1017";
 const CREAM = "#f4f1e8";
 const GOLD = "#ffd23f";
 
@@ -169,34 +169,33 @@ export class Hud {
     ctx.restore();
     text(ctx, "SCORE", x + scoreW + 8 * k, scoreY, 11 * k, "rgba(244,241,232,0.45)", "left", "alphabetic", 800);
 
-    // Health.
+    // Health, as cells rather than a sliver — see `chrome.cellBar`. A continuous bar
+    // losing four percent moves by a pixel nobody notices; a cell going dark is a
+    // discrete event, which is what taking a hit actually is.
     const hy = scoreY + 12 * k;
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    roundRect(ctx, x, hy, bw, barH, 5 * k);
-    ctx.fill();
     const f = s.god ? 1 : clamp(s.hp / s.maxHp, 0, 1);
     // God mode pulses so it never reads as an ordinary full health bar.
-    ctx.fillStyle = s.god
+    const hpFill = s.god
       ? `rgba(255,${200 + Math.round(Math.sin(s.time * 4) * 25)},63,1)`
       : f > 0.5 ? "#6ddc7a" : f > 0.25 ? GOLD : "#e8433a";
-    roundRect(ctx, x + 2 * k, hy + 2 * k, (bw - 4 * k) * f, barH - 4 * k, 4 * k);
-    ctx.fill();
-    text(ctx, s.god ? "GOD MODE" : `${Math.ceil(s.hp)}`, x + 8 * k, hy + barH / 2 + 0.5 * k,
-      10 * k, INK, "left", "middle", 900);
+    cellBar(ctx, x, hy, bw, barH, k, f, hpFill, 16);
+    // Right-aligned to the bar's end, cream over an ink stroke. It used to be dark text
+    // sitting on the left of a solid fill, which worked while the fill was solid — the
+    // cell gaps now cut straight through a glyph and chop the number into pieces.
+    text(ctx, s.god ? "GOD MODE" : `${Math.ceil(s.hp)}`, x + bw - 6 * k, hy + barH / 2 + 0.5 * k,
+      10 * k, CREAM, "right", "middle", 900, "rgba(0,0,0,0.85)");
 
     // Jetpack fuel, directly under health so the two read as one status block.
     if (!hasPack) return;
     const fy = hy + barH + 4 * k;
-    ctx.fillStyle = "rgba(0,0,0,0.5)";
-    roundRect(ctx, x, fy, bw, fuelH, 4 * k);
-    ctx.fill();
     const fuel = clamp(s.fuel, 0, 1);
     // Glows hot while burning, dims to amber when nearly dry.
-    ctx.fillStyle = s.jetThrottle > 0.05
+    const fuelFill = s.jetThrottle > 0.05
       ? `rgba(255,${190 + Math.round(s.jetThrottle * 50)},120,1)`
       : fuel > 0.25 ? "#5ec8ff" : "#e8433a";
-    roundRect(ctx, x + 1.5 * k, fy + 1.5 * k, (bw - 3 * k) * fuel, fuelH - 3 * k, 3 * k);
-    ctx.fill();
+    // Twice the cells of the health bar: the tank drains continuously while you hold
+    // the jet, so it needs finer resolution to read as draining rather than stepping.
+    cellBar(ctx, x, fy, bw, fuelH, k, fuel, fuelFill, 32);
   }
 
   /**
@@ -288,17 +287,15 @@ export class Hud {
     ctx.scale(scale, scale);
     ctx.translate(-cx, -y - pop * pop * 6 * k);
 
-    ctx.fillStyle = `rgba(14,16,23,${0.5 + pop * 0.3})`;
-    roundRect(ctx, x, y, bw, bh, 10 * k);
-    ctx.fill();
-    ctx.strokeStyle = pop > 0.02 ? rgba(a.tint, 0.35 + pop * 0.65) : "rgba(255,255,255,0.1)";
-    ctx.lineWidth = (1 + pop * 2) * k;
-    ctx.stroke();
+    // On a swap the ink edge is replaced by the round's own colour, which is a louder
+    // signal than the old widening hairline and costs nothing: the border is already
+    // being drawn, so the change is which colour it is, not how thick.
+    notchedPanel(ctx, x, y, bw, bh, k, PANEL_DIM,
+      pop > 0.02 ? rgba(a.tint, 0.35 + pop * 0.65) : undefined, 0.84 + pop * 0.16);
 
     // Accent bar in the round's own colour, so the card is identifiable at a glance.
     ctx.fillStyle = a.tint;
-    roundRect(ctx, x + 6 * k, y + 10 * k, 4 * k, bh - 20 * k, 2 * k);
-    ctx.fill();
+    ctx.fillRect(x + 6 * k, y + 10 * k, 4 * k, bh - 20 * k);
 
     const glyph = iconBitmap(a.id);
     ctx.drawImage(glyph, x + padL, y + bh / 2 - glyphW / 2, glyphW, glyphW);
@@ -345,23 +342,16 @@ export class Hud {
     const px0 = cx - plateW / 2;
     const py0 = baseY - plateH / 2;
 
-    ctx.save();
-    ctx.shadowColor = "rgba(0,0,0,0.55)";
-    ctx.shadowBlur = 14 * k;
-    ctx.shadowOffsetY = 3 * k;
-    ctx.fillStyle = "rgba(10,12,18,0.7)";
-    roundRect(ctx, px0, py0, plateW, plateH, plateH * 0.28);
-    ctx.fill();
-    ctx.restore();
-    ctx.strokeStyle = "rgba(255,255,255,0.09)";
-    ctx.lineWidth = 1 * k;
-    roundRect(ctx, px0, py0, plateW, plateH, plateH * 0.28);
-    ctx.stroke();
+    // The blurred drop shadow this used to carry was the last one in the game. An ink
+    // edge does the same job — separating the strip from whatever it is over — without
+    // the cost of a 14px blur redrawn every frame.
+    notchedPanel(ctx, px0, py0, plateW, plateH, k, PANEL_DIM, undefined, 0.88);
 
     this.ammoScroll = damp(this.ammoScroll, s.weapon.index, 14, dt);
 
     ctx.save();
-    roundRect(ctx, px0, py0, plateW, plateH, plateH * 0.28);
+    ctx.beginPath();
+    ctx.rect(px0, py0, plateW, plateH);
     ctx.clip();
 
     for (let i = 0; i < n; i++) {
@@ -376,12 +366,12 @@ export class Hud {
 
       ctx.save();
       ctx.globalAlpha = 0.4 + sel * 0.6;
-      ctx.fillStyle = sel > 0.5 ? "rgba(26,30,40,0.95)" : "rgba(20,23,31,0.55)";
-      roundRect(ctx, cxi - size / 2, py - size / 2, size, size, 9 * k);
-      ctx.fill();
-      ctx.strokeStyle = sel > 0.5 ? def.tint : "rgba(255,255,255,0.14)";
-      ctx.lineWidth = (1.2 + sel * 2) * k;
-      ctx.stroke();
+      // The selected cell takes the round's colour as its edge; the rest stay ink. On
+      // the old strip every cell had a pale hairline and the selected one was picked
+      // out only by being fractionally brighter, which is not a difference you can see
+      // at a glance mid-fight.
+      notchedPanel(ctx, cxi - size / 2, py - size / 2, size, size, k,
+        sel > 0.5 ? PANEL : PANEL_DIM, sel > 0.5 ? def.tint : undefined);
 
       const gs = size * 0.7;
       ctx.drawImage(iconBitmap(def.id), cxi - gs / 2, py - gs / 2, gs, gs);
@@ -399,13 +389,19 @@ export class Hud {
       ctx.restore();
     }
 
-    // Fade the ends rather than cutting them, so a long arsenal reads as continuing.
+    // Fade the ends so a long arsenal reads as continuing rather than as clipped — but
+    // in stepped bands, not a gradient, to stay inside the same rules as everything
+    // else. Four bands is enough to read as a fade at this width.
+    const bands = 4;
+    const bandW = 7 * k;
     for (const side of [0, 1]) {
-      const g = ctx.createLinearGradient(px0 + side * plateW, 0, px0 + side * plateW + (side ? -1 : 1) * 26 * k, 0);
-      g.addColorStop(0, "rgba(10,12,18,0.92)");
-      g.addColorStop(1, "rgba(10,12,18,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(side ? px0 + plateW - 26 * k : px0, py0, 26 * k, plateH);
+      for (let b = 0; b < bands; b++) {
+        ctx.fillStyle = `rgba(10,12,18,${0.9 - b * 0.22})`;
+        const bx = side
+          ? px0 + plateW - (b + 1) * bandW
+          : px0 + b * bandW;
+        ctx.fillRect(bx, py0, bandW, plateH);
+      }
     }
     ctx.restore();
 
@@ -512,18 +508,17 @@ export class Hud {
 
 // ---------------------------------------------------------------- primitives
 
-function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.roundRect(x, y, Math.max(0, w), Math.max(0, h), r);
-}
-
+/**
+ * A HUD status plate, in the same language as the menu. See `ui/chrome.ts`.
+ *
+ * The old one was a translucent `roundRect` with a hairline stroke, which is the exact
+ * CSS-card look System 10 spent a whole pass removing from the front end — and it read
+ * as a different game the moment you pressed PLAY. The panel keeps its transparency
+ * because it sits over the thing the player is aiming at; it loses its corner radius
+ * and its hairline, and gains an ink edge that holds up over a pale sky.
+ */
 function panel(ctx: Ctx, x: number, y: number, w: number, h: number, k: number, alpha = 0.42) {
-  ctx.fillStyle = `rgba(14,16,23,${alpha})`;
-  roundRect(ctx, x, y, w, h, 10 * k);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.08)";
-  ctx.lineWidth = 1 * k;
-  ctx.stroke();
+  notchedPanel(ctx, x, y, w, h, k, PANEL_DIM, undefined, alpha + 0.34);
 }
 
 /** The one font string every HUD label uses, so measuring and drawing always agree. */

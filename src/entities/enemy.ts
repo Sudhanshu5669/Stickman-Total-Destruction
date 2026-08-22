@@ -310,6 +310,9 @@ export class Enemy implements Actor {
     bloodPool(this.game, c, rand(0.8, 1.5) + cut * 0.35);
     this.game.particles.stars(c.x, c.y, 7);
     this.game.reportDestruction("enemy", c);
+    // Read straight off the ragdoll, before anything else can overwrite it. `cut` is
+    // already the count `severLimbs` decided on, so the callout and the gore agree.
+    this.game.reportKill({ at: c, cause: r.lastHitKind, severed: cut, damage: r.lastDamage });
     this.game.award(this.spec.points, c);
     sfx.scream();
     // Bodies that came apart are worth looking at for longer.

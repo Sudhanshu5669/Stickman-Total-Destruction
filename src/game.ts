@@ -3,6 +3,7 @@ import { Input } from "./core/input";
 import { Physics, type ImpactEvent, type PhysOwner } from "./core/physics";
 import type { Actor, GameCtx } from "./core/types";
 import { Particles } from "./fx/particles";
+import { Callouts, type KillFacts } from "./fx/callout";
 import { Decals, anchorAt, canMark } from "./fx/decals";
 import { WaterSim } from "./fx/fluid";
 import { FireSim } from "./fx/fire";
@@ -60,6 +61,7 @@ export class Game implements GameCtx {
   readonly input: Input;
   readonly camera = new Camera();
   readonly particles = new Particles();
+  readonly callouts = new Callouts();
   readonly decals = new Decals();
   readonly water = new WaterSim();
   readonly fire = new FireSim(this);
@@ -186,6 +188,7 @@ export class Game implements GameCtx {
     this.pending.length = 0;
     this.damageList.length = 0;
     this.particles.clear();
+    this.callouts.clear();
     this.decals.clear();
     this.water.clear();
     this.fire.clear();
@@ -284,6 +287,7 @@ export class Game implements GameCtx {
     this.bankRun();
     this.mode = "playing";
     this.particles.mute = false;
+    this.callouts.mute = false;
     this.demo = null;
     this.paused = false;
     this.hintAlpha = 1;
@@ -310,6 +314,7 @@ export class Game implements GameCtx {
     this.paused = false;
     // The attract demo scores as it plays; its callouts would land on the menu type.
     this.particles.mute = true;
+    this.callouts.mute = true;
     this.loadLevel(this.menu.previewLevel);
     this.demo = new DemoDriver(this);
     this.demo.reset(this.level.spawn);
@@ -445,6 +450,10 @@ export class Game implements GameCtx {
     };
   }
 
+  reportKill(facts: KillFacts) {
+    this.callouts.kill(facts);
+  }
+
   reportDestruction(kind: "block" | "enemy" | "structure", at: V) {
     if (kind === "block") this.blocksDestroyed++;
     this.combo++;
@@ -538,6 +547,9 @@ export class Game implements GameCtx {
 
     this.background.update(rawDt);
     this.particles.update(rawDt * (scale > 0 ? Math.max(scale, 0.25) : 0.02));
+    // Real time, not simulated: a callout waiting out its group window must not be
+    // held frozen by the hit-stop that the kill which queued it just caused.
+    this.callouts.update(rawDt, this.particles);
 
     this.displayScore = Math.round(damp(this.displayScore, this.score, 9, rawDt));
     this.flashStrength = Math.max(0, this.flashStrength - rawDt * 3.4);

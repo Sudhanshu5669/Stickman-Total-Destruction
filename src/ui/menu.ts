@@ -7,6 +7,7 @@ import { settings, SHAKE_LABELS } from "./settings";
 import { quality, TIER_LABELS } from "./quality";
 import { progress } from "./progress";
 import { AMMO_BY_ID } from "../weapons/ammo";
+import { notchedPanel, INK, CREAM, GOLD, PANEL, PANEL_LIT, PANEL_DIM, MUTED } from "./chrome";
 
 /**
  * The front end.
@@ -24,29 +25,18 @@ import { AMMO_BY_ID } from "../weapons/ammo";
  * flat fills, hard edges, notched corners, a small palette used decisively, and type
  * heavy enough to be read at a glance from across a room.
  *
- * So the rules here, and they are followed without exception:
+ * The rendering rules — no gradient, no rounded corner, no drop shadow — now live in
+ * `ui/chrome.ts`, because the HUD is drawn to the same ones and two copies of a visual
+ * language is how the two halves of an interface drift apart. What is left here is what
+ * is specific to the front end:
  *
- * 1. **No gradient anywhere.** Every fill is one flat colour. Depth comes from *value*
- *    — a lighter top edge and a darker bottom edge on the same panel — the same trick
- *    the weapon sprites use (`render/gunart.ts`), so the UI and the guns are lit from
- *    the same imaginary light.
- * 2. **No rounded corners.** Panels are notched instead: the corner pixel is cut out.
- *    That single detail is most of what separates a pixel-art frame from a CSS card.
- * 3. **No drop shadows.** Separation is a one-pixel ink outline, again as the guns do.
- * 4. **The arena previews are painted from the arenas' own art** — theme colours and a
- *    slice of the tileset each level actually uses — so the card shows the place rather
- *    than a coloured rectangle with a name on it.
- * 5. **One accent per arena**, taken from the level definition, so the seven read as
+ * 1. **The arena previews are painted from the arenas' own themes and shapes**, so a
+ *    card shows the place rather than a coloured rectangle with a name on it.
+ * 2. **One accent per arena**, taken from the level definition, so the seven read as
  *    seven places rather than seven rows of a list.
  */
 
-const INK = "#12151c";
-const CREAM = "#f4f1e8";
-const GOLD = "#ffd23f";
-const PANEL = "#1b2029";
-const PANEL_LIT = "#2b3340";
-const PANEL_DIM = "#0e1116";
-const MUTED = "rgba(244,241,232,0.42)";
+
 
 /** Things the menu handles by itself. `click()` applies them and reports `none`. */
 type UiAction =
@@ -493,38 +483,6 @@ export class Menu {
     const m = this.lastMouse;
     return m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h;
   }
-}
-
-// ------------------------------------------------------------------ chrome
-
-/**
- * A hard-edged panel with its corners notched out and its top edge lit.
- *
- * This one function is most of the reason the menu does not look like a web page.
- * `roundRect` + a shadow reads as a card; a notched rectangle with a one-pixel ink
- * border and a lighter top edge reads as a sprite. Both are four lines of code.
- */
-function notchedPanel(
-  ctx: Ctx, x: number, y: number, w: number, h: number, k: number,
-  fill: string, inkOverride?: string,
-) {
-  const n = Math.max(2, Math.round(3 * k)); // notch size, in whole pixels
-  const ink = inkOverride ?? INK;
-
-  ctx.fillStyle = ink;
-  ctx.fillRect(x + n, y, w - n * 2, h);
-  ctx.fillRect(x, y + n, w, h - n * 2);
-
-  const i = Math.max(1, Math.round(k));
-  ctx.fillStyle = fill;
-  ctx.fillRect(x + n + i, y + i, w - n * 2 - i * 2, h - i * 2);
-  ctx.fillRect(x + i, y + n + i, w - i * 2, h - n * 2 - i * 2);
-
-  // Value, not gradient: one lit row along the top, one dark row along the bottom.
-  ctx.fillStyle = "rgba(255,255,255,0.14)";
-  ctx.fillRect(x + n + i, y + i, w - n * 2 - i * 2, i);
-  ctx.fillStyle = "rgba(0,0,0,0.28)";
-  ctx.fillRect(x + n + i, y + h - i * 2, w - n * 2 - i * 2, i);
 }
 
 // ------------------------------------------------------------------ previews

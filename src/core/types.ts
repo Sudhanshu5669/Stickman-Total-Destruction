@@ -2,6 +2,7 @@ import type { Camera } from "./camera";
 import type { Physics } from "./physics";
 import type { Particles } from "../fx/particles";
 import type { Decals } from "../fx/decals";
+import type { KillFacts } from "../fx/callout";
 import type { WaterSim } from "../fx/fluid";
 import type { FireSim } from "../fx/fire";
 import type { Ctx } from "../render/draw";
@@ -72,6 +73,12 @@ export interface GameCtx {
   flash(strength: number, color?: string): void;
   /** Registers destruction for the combo meter. */
   reportDestruction(kind: "block" | "enemy" | "structure", at: V): void;
+  /**
+   * Reports one death for the callout batcher. Separate from `reportDestruction`
+   * because it carries *how* the stickman died, which only the victim's own ragdoll
+   * knows and which the combo meter has no use for. See `fx/callout.ts`.
+   */
+  reportKill(facts: KillFacts): void;
   /** Panics every stickman within `radius` — called after every explosion. */
   alertEnemiesNear(at: V, radius: number): void;
   /** Spawns a physical rubble chunk, subject to the global debris cap. */

@@ -137,6 +137,18 @@ export class Ragdoll implements PhysOwner {
   readonly severedBones = new Set<string>();
   /** Size of the blow that last landed, so death can decide how messy it was. */
   lastDamage = 0;
+  /**
+   * What kind of thing landed that blow — the whole basis of the death callouts.
+   *
+   * The alternative was threading the *identity* of the killer through the physics
+   * graph so a kill could name the round that did it. It isn't worth it: the spawn
+   * closures in `weapons/ammo.ts` never see their own `AmmoDef`, so naming the round
+   * would mean editing nineteen call sites to carry a string that the funniest half of
+   * the callouts don't even use. Being crushed by masonry, dropped by the floor or
+   * bowled over by another stickman are all *physics* outcomes, which is exactly where
+   * the spec says the comedy is supposed to come from. See `fx/callout.ts`.
+   */
+  lastHitKind: PhysOwner["kind"] | null = null;
   /** Accumulates between blood drips from open wounds. */
   bleedTimer = 0;
 
@@ -481,7 +493,7 @@ export class Ragdoll implements PhysOwner {
     if (this.dead) return;
     const kj = energy / 1000;
     if (kj <= this.impactIgnore) return;
-    this.takeDamage((kj - this.impactIgnore) * this.impactFragility, point);
+    this.takeDamage((kj - this.impactIgnore) * this.impactFragility, point, other);
   }
 
   /**
@@ -521,11 +533,15 @@ export class Ragdoll implements PhysOwner {
     return pt;
   }
 
-  takeDamage(amount: number, at?: V) {
+  takeDamage(amount: number, at?: V, source?: PhysOwner | null) {
     if (this.dead || this.disposed || this.invulnerable || amount <= 0) return;
     const dmg = amount * this.damageScale;
     if (dmg <= 0) return;
     this.lastDamage = dmg;
+    // Only a blow that names its source overwrites the record. An explosion calls
+    // `takeDamage` with no owner, and a nameless follow-up tick must not erase the
+    // block that actually did the killing a frame earlier.
+    if (source) this.lastHitKind = source.kind;
     this.hp -= dmg;
     this.onHurt?.(this, dmg, at ?? this.center());
     if (this.hp <= 0) {
