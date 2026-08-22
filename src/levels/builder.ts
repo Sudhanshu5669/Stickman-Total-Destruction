@@ -12,6 +12,27 @@ import { Decor } from "./hazards";
  * scripted collapse. Everything you see fall down was solved, not animated.
  *
  * Terrain colours default to the level's theme, so a world's palette is declared once.
+ *
+ * ## Coordinates, and the one thing that keeps going wrong
+ *
+ * This class grew three different conventions, and mixing them up does not throw — it
+ * quietly builds a level with a hole in it:
+ *
+ * | family                              | x        | y                |
+ * |-------------------------------------|----------|------------------|
+ * | `ground`, `ledge` (raw `Terrain`)    | centre   | **centre**       |
+ * | `block`, `loose` (raw `Block`)       | centre   | **centre**       |
+ * | `wall`, `tower`, `house`, `pyramid`  | centre   | bottom (`baseY`) |
+ * | `spriteWall`                         | **left** | bottom           |
+ *
+ * Reading `ground`'s x as a left edge is what left two whole bands of the Proving
+ * Ground standing over a void, with every stickman in them falling out of the world
+ * while the anchored props hung in the air looking perfectly fine.
+ *
+ * **Prefer the span helpers below** — `groundSpan`, `shelf`, `basin` — for anything
+ * load-bearing. They take explicit left and right edges and an explicit top surface,
+ * which is how a level author actually thinks about ground, and they cannot be read
+ * two ways.
  */
 export class Builder {
   readonly enemies: Enemy[] = [];
@@ -531,4 +552,213 @@ export class Builder {
     }
     return y;
   }
+
+  // ------------------------------------------------------------- spans
+  //
+  // Everything below takes explicit edges. See the coordinate note on the class.
+
+  /**
+   * Ground from `x0` to `x1`, with its surface at `top`.
+   *
+   * This is the one that should be reached for by default. `ground()` places a slab by
+   * its centre in both axes, which is the correct thing for a physics body and the
+   * wrong thing for a level author, who knows where the ground *starts*, where it
+   * *ends*, and what height you stand on.
+   */
+  groundSpan(x0: number, x1: number, top: number, depth = 6) {
+    const w = Math.abs(x1 - x0);
+    return this.ground(Math.min(x0, x1) + w / 2, top - depth / 2, w, depth);
+  }
+
+  /** `groundSpan` with a tiled surface, in one call — every pixel-art arena wants this. */
+  skinnedGround(x0: number, x1: number, top: number, sheet: Sheet, tx = 0, ty = 0, depth = 6) {
+    return this.skin(this.groundSpan(x0, x1, top, depth), { sheet, tx, ty });
+  }
+
+  /**
+   * A floating platform, by edges, with its walkable surface at `top`.
+   *
+   * Static terrain rather than a block: a platform the player is meant to stand on and
+   * fight from should not be knocked out from under them by a stray chicken. Things
+   * that are *supposed* to fall are built out of `block`.
+   */
+  shelf(x0: number, x1: number, top: number, thickness = 1.2) {
+    const w = Math.abs(x1 - x0);
+    return this.ledge(Math.min(x0, x1) + w / 2, top - thickness / 2, w, thickness);
+  }
+
+  /**
+   * A pit with walls: floor, two sides, and a run of steps up each of them.
+   *
+   * The shape the "fight in the round" arena is built on. A flat field puts every enemy
+   * at one height and reduces the whole fight to left-or-right; a basin stacks them
+   * above each other, so the frame has a foreground, a middle and a rim, and the
+   * jetpack becomes a way of choosing which of the three you are in.
+   *
+   * Steps rather than a smooth curve because a curve made of boxes is a staircase with
+   * extra steps, and because the ledges are where the interesting enemies stand.
+   *
+   * @param rimY   Height of the ground outside the bowl.
+   * @param floorY Height of the bowl's floor.
+   */
+  basin(cx: number, halfW: number, rimY: number, floorY: number, steps = 3) {
+    const depth = rimY - floorY;
+    const stepH = depth / (steps + 1);
+    const stepW = (halfW * 0.42) / steps;
+
+    this.groundSpan(cx - halfW, cx + halfW, floorY, 6);
+
+    // The two walls, as stacks of terrain, each course inset from the one below.
+    for (let i = 0; i < steps; i++) {
+      const y = floorY + stepH * (i + 1);
+      const inset = halfW - stepW * (steps - i);
+      this.shelf(cx - halfW - 2, cx - inset, y, stepH + 0.4);
+      this.shelf(cx + inset, cx + halfW + 2, y, stepH + 0.4);
+    }
+
+    // The rim, running out to either side. Generous, so the player has somewhere to
+    // stand and look down into the thing before committing to it.
+    this.groundSpan(cx - halfW - 40, cx - halfW - 1.5, rimY, 6);
+    this.groundSpan(cx + halfW + 1.5, cx + halfW + 40, rimY, 6);
+    return { floorY, rimY, stepH };
+  }
+
+  // ------------------------------------------------------------- structures
+
+  /**
+   * A tower you are meant to climb, not just knock over.
+   *
+   * `tower()` builds a sealed stack of floors: excellent to topple, impossible to enter.
+   * This leaves one side of every storey open, alternating which side, so there is a
+   * route up the outside — and it hangs a landing off each opening, so the route is
+   * flyable with the jetpack and survivable without it.
+   *
+   * The floors are ordinary blocks, so the climb can still be deleted underneath you.
+   * That is the arena: the fastest way down is to remove the way up.
+   */
+  scaffold(opts: {
+    x: number;
+    baseY: number;
+    floors: number;
+    width: number;
+    floorHeight?: number;
+    material: MaterialId;
+    /** Enemies placed on the landing of every Nth floor. */
+    guards?: EnemyKind[];
+    guardEvery?: number;
+    arms?: CombatOptions | null;
+  }) {
+    const fh = opts.floorHeight ?? 3.2;
+    const colW = 0.5;
+    const half = opts.width / 2;
+    const every = opts.guardEvery ?? 2;
+    let y = opts.baseY;
+
+    for (let f = 0; f < opts.floors; f++) {
+      const openRight = f % 2 === 0;
+      // The closed side is a full column. The open side gets a lintel hung from the
+      // slab above rather than a stub standing on the floor: a short column floating in
+      // the middle of a storey reads as a bug, where a header over a doorway reads as
+      // a doorway — and both carry the same load, because both are anchored.
+      const closedX = openRight ? opts.x - half + colW / 2 : opts.x + half - colW / 2;
+      const openX = openRight ? opts.x + half - colW / 2 : opts.x - half + colW / 2;
+      this.block(closedX, y + fh / 2, colW, fh, opts.material);
+      const lintel = fh * 0.3;
+      this.block(openX, y + fh - lintel / 2, colW, lintel, opts.material);
+
+      y += fh;
+      this.block(opts.x, y + 0.2, opts.width, 0.4, opts.material);
+
+      // Landing on the open side — the thing that makes the climb a route rather than
+      // a wall with gaps in it.
+      const lx = opts.x + (openRight ? half + 1.4 : -half - 1.4);
+      this.block(lx, y + 0.2, 3, 0.4, opts.material);
+
+      if (opts.guards?.length && f % every === 0) {
+        const k = opts.guards[Math.floor(f / every) % opts.guards.length];
+        this.enemy(k, lx, y + 0.5, openRight ? -1 : 1, opts.arms);
+      }
+      y += 0.4;
+    }
+    return y;
+  }
+
+  /**
+   * A city block, straight out of the City Tiles pack.
+   *
+   * Same trick as `spriteWall` — every cell is a real body wearing its own square of
+   * the sheet — but laid out as a building with a repeating middle, so one call makes a
+   * tower of any height out of a sheet that only draws three storeys.
+   *
+   * @param x     Left edge, in metres. Matches `spriteWall`, not the `wall` family.
+   * @param tx    Column in the sheet this building's facade starts at.
+   * @param storeys How many times the middle band repeats.
+   */
+  cityBlock(o: {
+    sheet: Sheet;
+    tx: number;
+    /** Rows in the sheet: the ground floor, the repeating middle, and the roof. */
+    groundRow: number;
+    midRow: number;
+    roofRow: number;
+    cols: number;
+    storeys: number;
+    x: number;
+    baseY: number;
+    material: MaterialId;
+  }) {
+    let y = o.baseY;
+    this.spriteWall({
+      sheet: o.sheet, tx: o.tx, ty: o.groundRow, cols: o.cols, rows: 1,
+      x: o.x, baseY: y, material: o.material,
+    });
+    y += 1;
+    for (let i = 0; i < o.storeys; i++) {
+      this.spriteWall({
+        sheet: o.sheet, tx: o.tx, ty: o.midRow, cols: o.cols, rows: 1,
+        x: o.x, baseY: y, material: o.material,
+      });
+      y += 1;
+    }
+    this.spriteWall({
+      sheet: o.sheet, tx: o.tx, ty: o.roofRow, cols: o.cols, rows: 1,
+      x: o.x, baseY: y, material: o.material,
+    });
+    return y + 1;
+  }
+
+  /**
+   * A chain of islands over a drop.
+   *
+   * Returns the centre of each island so the caller can put something on top of them
+   * without recomputing the arithmetic — which is the only reason this is a method
+   * rather than a loop at the call site.
+   *
+   * Widths and gaps vary with `spread` so the chain is not a metronome: an even
+   * sequence of identical hops is a corridor drawn vertically.
+   */
+  islands(x0: number, count: number, opts: {
+    width?: number;
+    gap?: number;
+    top?: number;
+    rise?: number;
+    spread?: number;
+  } = {}) {
+    const width = opts.width ?? 9;
+    const gap = opts.gap ?? 6;
+    const top = opts.top ?? 0;
+    const rise = opts.rise ?? 0;
+    const spread = opts.spread ?? 0.35;
+    const out: { x: number; top: number; w: number }[] = [];
+    let x = x0;
+    for (let i = 0; i < count; i++) {
+      const w = width * (1 + rand(-spread, spread));
+      const y = top + rise * i + rand(-1, 1) * rise * 0.4;
+      this.shelf(x, x + w, y, 2.2);
+      out.push({ x: x + w / 2, top: y, w });
+      x += w + gap * (1 + rand(-spread, spread));
+    }
+    return out;
+  }
+
 }

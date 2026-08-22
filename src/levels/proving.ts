@@ -66,12 +66,9 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   // corner (see `Terrain`). Reading it as a corner is what left bands 5 and 6 of this
   // arena standing over a void, with every stickman in them quietly falling out of the
   // world while the anchored props hung in the air looking fine.
-  const GROUND_X0 = -50;
-  const GROUND_X1 = 125;
-  b.skin(
-    b.ground((GROUND_X0 + GROUND_X1) / 2, G0 - 3, GROUND_X1 - GROUND_X0, 6),
-    { sheet: b.sheet(FLOOR), tx: 0, ty: 0 },
-  );
+  // `skinnedGround` takes explicit edges, which is why this can be read at a glance and
+  // the centre-based `ground()` it replaces could not. See the note on `Builder`.
+  b.skinnedGround(-50, 125, G0, b.sheet(FLOOR));
 
   // ------------------------------------------------------- band 0: crouch cover
   // The only geometry in the arena that tests ducking, and it needs its own clear lane.
@@ -156,9 +153,32 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   });
   b.gunner("guard", 112, G0, -1, { gun: "sniper", behavior: "sentry" });
 
+  // ------------------------------------------------------- band 7: shape primitives
+  // The four span/shape builders the six shipping arenas are made of, each proved here
+  // before an arena is authored on top of it. They are the pieces most likely to be
+  // subtly wrong — a shelf a metre from where you meant it is invisible in code and
+  // obvious the moment a stickman walks off it.
+  //
+  // Deliberately past the sniper: this band is a test rig, not a place to fight.
+
+  // `islands` — a chain over a drop, rising as it goes.
+  b.islands(132, 5, { width: 7, gap: 5, top: G0 + 2, rise: 1.6 });
+
+  // Ground under the scaffold and up to the basin rim. The islands keep their void on
+  // purpose — a chain of platforms with a floor under it is a set of steps.
+  b.skinnedGround(172, 199, G0, b.sheet(FLOOR));
+
+  // `scaffold` — a tower with a climbable open side and a landing per storey.
+  b.scaffold({ x: 178, baseY: G0, floors: 5, width: 6, material: "concrete",
+               guards: ["grunt", "guard"], arms: { behavior: "sentry" } });
+
+  // `basin` — a stepped pit with a rim to look into it from.
+  b.basin(215, 16, G0, G0 - 9, 3);
+  b.crowd(215, G0 - 9, ["grunt", "grunt", "guard"], 2.2, null);
+
   return {
     spawn: v(-34, G0 + 1.2),
-    bounds: { min: -44, max: 120 },
+    bounds: { min: -44, max: 245 },
     enemies: b.enemies,
     groundY: G0,
   };

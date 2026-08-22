@@ -109,7 +109,31 @@ export interface Theme {
 }
 
 /** Where the platformer pack's parallax layers live, so the paths appear once. */
-const BG = "GandalfHardcore FREE Platformer Assets/GandalfHardcore Background layers/Normal BG";
+const PACK_BG = "GandalfHardcore FREE Platformer Assets/GandalfHardcore Background layers";
+const BG = `${PACK_BG}/Normal BG`;
+const BG_AUTUMN = `${PACK_BG}/Autumn BG`;
+const BG_WINTER = `${PACK_BG}/Winter BG`;
+const BG_CITY = "GandalfHardcore City Tiles";
+
+/**
+ * The platformer pack's five parallax plates, as one backdrop.
+ *
+ * The three seasonal sets are the same picture repainted, so they share every number:
+ * identical size, identical anchor, only the scroll rate differing between plates. See
+ * the long note on `grove.sprites` for why sizing them individually destroys the
+ * illusion — that lesson cost real time and applies to all three.
+ */
+const seasonBackdrop = (dir: string, castle: string, sky: string): SpriteBackdrop => ({
+  sky,
+  layers: [
+    { path: `${dir}/GandalfHardcore Background layers_layer 5.png`, depth: 0.02, height: 34, lift: -1 },
+    { path: `${dir}/${castle}`, depth: 0.05, height: 15, lift: -1 },
+    { path: `${dir}/GandalfHardcore Background layers_layer 4.png`, depth: 0.10, height: 15, lift: -1 },
+    { path: `${dir}/GandalfHardcore Background layers_layer 3.png`, depth: 0.17, height: 15, lift: -1 },
+    { path: `${dir}/GandalfHardcore Background layers_layer 2.png`, depth: 0.27, height: 15, lift: -1 },
+    { path: `${dir}/GandalfHardcore Background layers_layer 1.png`, depth: 0.42, height: 15, lift: -1 },
+  ],
+});
 
 export const THEMES: Record<string, Theme> = {
   /**
@@ -351,4 +375,139 @@ export const THEMES: Record<string, Theme> = {
       ],
     },
   },
+
+  /**
+   * Ashfall — the autumn valley.
+   *
+   * Same pack, same plates, repainted warm. It exists because a set of six arenas needs
+   * to be six *places*, and the cheapest honest way to get a second place out of one
+   * tileset is the season the artist already drew. The ground colours are pulled off the
+   * autumn plates rather than reused from `grove`, so a hole blown in the turf exposes
+   * the same russet the backdrop is painted in.
+   */
+  autumn: {
+    id: "autumn",
+    sky: ["#c98a4b", "#e0a862", "#efc98d", "#f6e0b4"],
+    horizonGlow: "255,214,150",
+    horizonGlowAlpha: 0.26,
+    hillFar: "#9a7440",
+    hillMid: "#7d5730",
+    hillNear: "#5a3d22",
+    skyline: "none",
+    skylineColor: "#5a3d22",
+    skylineFar: "#9a7440",
+    windowColor: "rgba(255,206,120,0.85)",
+    cloudColor: "255,240,214",
+    cloudAlpha: 0,
+    cloudCount: 0,
+    sun: null,
+    moon: null,
+    stars: 0,
+    starColor: "#ffffff",
+    haze: "236,200,150",
+    ground: "#2e1d10",
+    groundTop: "#a8622a",
+    rock: "#6f5e4c",
+    rockTop: "#9c8770",
+    underground: "#160d06",
+    foreground: "#2a1a0e",
+    foregroundKind: "grass",
+    ambient: "#ffc27a",
+    ambientAlpha: 0.08,
+    vegetation: false,
+    sprites: seasonBackdrop(BG_AUTUMN, "Background Castle Autumn.png", "#dda86a"),
+  },
+
+  /**
+   * Coldspine — the winter fortress.
+   *
+   * The one arena with a genuinely cold palette, which matters more than it sounds:
+   * five warm-to-neutral worlds in a row make the whole game feel like one long level.
+   * Snow also does something no other surface here does — it makes the black stickman
+   * the *darkest* thing in the frame by a wide margin, so the ragdolls read even when
+   * the screen is full of debris.
+   */
+  winter: {
+    id: "winter",
+    sky: ["#5d7fa8", "#8fb0cc", "#c2d8e6", "#e6eff5"],
+    horizonGlow: "226,240,252",
+    horizonGlowAlpha: 0.3,
+    hillFar: "#8fa3b8",
+    hillMid: "#6d8298",
+    hillNear: "#4e6376",
+    skyline: "none",
+    skylineColor: "#4e6376",
+    skylineFar: "#8fa3b8",
+    windowColor: "rgba(255,206,120,0.9)",
+    cloudColor: "255,255,255",
+    cloudAlpha: 0,
+    cloudCount: 0,
+    sun: null,
+    moon: null,
+    stars: 0,
+    starColor: "#ffffff",
+    haze: "222,236,246",
+    // Frozen earth under snow, so a crater reads as broken ground rather than as a hole
+    // in a white rectangle.
+    ground: "#2a3340",
+    groundTop: "#eaf2f8",
+    rock: "#5c6773",
+    rockTop: "#8f9ba8",
+    underground: "#141a22",
+    foreground: "#20303f",
+    foregroundKind: "rock",
+    ambient: "#cfe4f5",
+    ambientAlpha: 0.1,
+    vegetation: false,
+    sprites: seasonBackdrop(BG_WINTER, "Background Castle  Winter.png", "#a8c6da"),
+  },
+
+  /**
+   * Grid City — the street.
+   *
+   * A different pack entirely, and the only arena with a man-made horizon. Its backdrop
+   * is three plates rather than six and they are *wider* than they are tall, so they are
+   * anchored lower and drawn larger than the platformer set: a city skyline wants to sit
+   * on the ground line and tower over it, where a treeline wants to sit behind it.
+   */
+  city: {
+    id: "city",
+    sky: ["#1b2540", "#33436b", "#5f6f95", "#93a0bd"],
+    horizonGlow: "180,196,232",
+    horizonGlowAlpha: 0.24,
+    hillFar: "#3d4866",
+    hillMid: "#2e3852",
+    hillNear: "#222a3e",
+    skyline: "none",
+    skylineColor: "#222a3e",
+    skylineFar: "#3d4866",
+    windowColor: "rgba(255,214,140,0.95)",
+    cloudColor: "210,220,244",
+    cloudAlpha: 0,
+    cloudCount: 0,
+    sun: null,
+    moon: null,
+    stars: 0,
+    starColor: "#ffffff",
+    haze: "150,166,204",
+    ground: "#262b34",
+    groundTop: "#4c5561",
+    rock: "#3c4450",
+    rockTop: "#5e6874",
+    underground: "#12151b",
+    foreground: "#161b25",
+    foregroundKind: "rock",
+    ambient: "#8fa8d8",
+    ambientAlpha: 0.07,
+    vegetation: false,
+    sprites: {
+      sky: "#4a5878",
+      layers: [
+        { path: `${BG_CITY}/City background sky.png`, depth: 0.02, height: 30, lift: -2 },
+        { path: `${BG_CITY}/City background layer2.png`, depth: 0.09, height: 24, lift: -2 },
+        { path: `${BG_CITY}/City background layer1.png`, depth: 0.2, height: 22, lift: -2 },
+      ],
+    },
+  },
+
 };
