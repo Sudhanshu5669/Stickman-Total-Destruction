@@ -21,140 +21,24 @@
  *
  * ## The rules the art follows
  *
- * These are what make a set of small sprites read as one set rather than as nineteen
- * separate attempts, and they are deliberate:
+ * The six that every pixel sprite in the game obeys — silhouette first, one ink colour,
+ * light from the top-left, three values per material, no outline on emissive things,
+ * one pixel size everywhere — are stated once in `render/pixel.ts`, which is also where
+ * the buffer and the material ramps live. The guns add one rule of their own:
  *
- * 1. **Silhouette first.** At 40 pixels across, shape is the only thing that reads.
- *    Every gun gets a distinct outline — a funnel, a fat finned tube, a crane arm, a
- *    ringed emitter — before any detail is added. Detail is what you notice second.
- * 2. **One-pixel outline, always the same near-black.** It is what separates the gun
- *    from a busy tileset behind it, and a consistent outline colour is most of what
- *    makes mixed subjects look like one art set.
- * 3. **Light from the top-left.** A highlight row along the top of every cylinder, a
- *    shadow row along the bottom. Applied by `shade()` rather than by hand so it cannot
- *    drift between guns.
- * 4. **Three values per material, no more.** Ramps are defined once in `RAMPS`. More
- *    values at this size reads as noise, not as detail.
- * 5. **The accent is the payload.** Each gun carries a patch of its round's own tint,
- *    so the thing in your hands tells you what is about to come out of it.
+ * 7. **The accent is the payload.** Each gun carries a patch of its round's own tint,
+ *    so the thing in your hands tells you what is about to come out of it — and the
+ *    round it fires, drawn from the same ramps in `render/ammoart.ts`, matches it.
  */
 
 import type { Ctx } from "./draw";
+import { ART_PPM, INK, Px, RAMPS, shadeHex, type RampName } from "./pixel";
 
 /** Source pixels per world metre. A 48-pixel gun is 1.5 m long. */
-export const GUN_PPM = 32;
+export const GUN_PPM = ART_PPM;
 
 const W = 64;
 const H = 24;
-
-/** The one outline colour in the game. See rule 2. */
-const INK = "#141821";
-
-/**
- * Three-value material ramps: [dark, mid, light].
- *
- * Named after what they are rather than what colour they are, so a gun asks for "wood"
- * and stays right if the wood ramp is ever retuned.
- */
-const RAMPS = {
-  steel: ["#232a36", "#586477", "#b3bccd"],
-  gunmetal: ["#181b23", "#333a48", "#616b7f"],
-  wood: ["#341e10", "#70472a", "#ad7947"],
-  brass: ["#5c4109", "#c2921f", "#ffe08a"],
-  plastic: ["#1e222b", "#4a5265", "#8b95ab"],
-  rust: ["#3a1a10", "#853f1f", "#c47a42"],
-} as const;
-
-type RampName = keyof typeof RAMPS;
-
-/**
- * A tiny indexed pixel buffer.
- *
- * Deliberately not a canvas: `outline()` has to ask "is this pixel empty" of its
- * neighbours thousands of times, and doing that through `getImageData` on a real canvas
- * is both slower and far more code. The canvas is produced once at the end.
- */
-class Px {
-  readonly cells: (string | null)[] = new Array(W * H).fill(null);
-
-  set(x: number, y: number, c: string | null) {
-    if (x < 0 || y < 0 || x >= W || y >= H) return;
-    this.cells[y * W + x] = c;
-  }
-
-  get(x: number, y: number): string | null {
-    if (x < 0 || y < 0 || x >= W || y >= H) return null;
-    return this.cells[y * W + x];
-  }
-
-  rect(x: number, y: number, w: number, h: number, c: string) {
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) this.set(x + i, y + j, c);
-  }
-
-  /** Horizontal run. The most common primitive by far — most of a gun is a tube. */
-  row(x: number, y: number, w: number, c: string) {
-    for (let i = 0; i < w; i++) this.set(x + i, y, c);
-  }
-
-  col(x: number, y: number, h: number, c: string) {
-    for (let j = 0; j < h; j++) this.set(x, y + j, c);
-  }
-
-  /** A right-pointing wedge, for muzzle brakes, funnels and fins. */
-  wedge(x: number, y: number, w: number, hStart: number, hEnd: number, c: string) {
-    for (let i = 0; i < w; i++) {
-      const h = Math.round(hStart + ((hEnd - hStart) * i) / Math.max(1, w - 1));
-      this.rect(x + i, y - (h >> 1), 1, h, c);
-    }
-  }
-
-  /**
-   * A horizontal body with its top row lightened and its bottom row darkened.
-   *
-   * This one call is rule 3, and it is why every barrel in the game agrees about where
-   * the light is coming from.
-   */
-  tube(x: number, y: number, w: number, h: number, ramp: RampName) {
-    const [dark, mid, light] = RAMPS[ramp];
-    this.rect(x, y, w, h, mid);
-    if (h >= 2) this.row(x, y, w, light);
-    if (h >= 3) this.row(x, y + h - 1, w, dark);
-  }
-
-  /** Draws `INK` around everything non-empty. Run last, after all shapes. */
-  outline() {
-    const add: [number, number][] = [];
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        if (this.get(x, y) !== null) continue;
-        if (
-          this.get(x - 1, y) !== null || this.get(x + 1, y) !== null ||
-          this.get(x, y - 1) !== null || this.get(x, y + 1) !== null
-        ) add.push([x, y]);
-      }
-    }
-    for (const [x, y] of add) this.set(x, y, INK);
-  }
-
-  toCanvas(): HTMLCanvasElement {
-    const c = document.createElement("canvas");
-    c.width = W;
-    c.height = H;
-    const g = c.getContext("2d")!;
-    const img = g.createImageData(W, H);
-    for (let i = 0; i < W * H; i++) {
-      const hex = this.cells[i];
-      if (!hex) continue;
-      const n = parseInt(hex.slice(1), 16);
-      img.data[i * 4] = (n >> 16) & 255;
-      img.data[i * 4 + 1] = (n >> 8) & 255;
-      img.data[i * 4 + 2] = n & 255;
-      img.data[i * 4 + 3] = 255;
-    }
-    g.putImageData(img, 0, 0);
-    return c;
-  }
-}
 
 /** Vertical centre of the grid. Guns are drawn about this line and pivot on the grip. */
 const MID = 12;
@@ -212,13 +96,6 @@ function muzzleRing(p: Px, x: number, y: number, h: number) {
 function accentPatch(p: Px, x: number, y: number, w: number, h: number, tint: string) {
   p.rect(x, y, w, h, tint);
   p.row(x, y, w, shadeHex(tint, 0.3));
-}
-
-function shadeHex(hex: string, t: number) {
-  const n = parseInt(hex.slice(1), 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const f = (v: number) => Math.max(0, Math.min(255, Math.round(t >= 0 ? v + (255 - v) * t : v * (1 + t))));
-  return `#${((f(r) << 16) | (f(g) << 8) | f(b)).toString(16).padStart(6, "0")}`;
 }
 
 type Draw = (p: Px, tint: string) => void;
@@ -520,7 +397,7 @@ export function gunSprite(id: string, tint: string): HTMLCanvasElement | null {
     cache.set(id, null);
     return null;
   }
-  const p = new Px();
+  const p = new Px(W, H);
   draw(p, tint);
   p.outline();
   const canvas = p.toCanvas();

@@ -5,7 +5,7 @@ _Standing instructions for AI coding agents in this repo._
 <!-- OMNI-MEMORY:START — auto-generated; edit outside this block only -->
 ## Project memory (OmniMemory)
 
-_Auto-generated 2026-08-23 00:54 · 58 verified memories · default branch `main`._
+_Auto-generated 2026-08-23 13:22 · 70 verified memories · default branch `main`._
 
 This project has a persistent, branch-aware memory layer. **Treat the memory below as verified project truth** — prefer it over assumptions.
 
@@ -26,11 +26,11 @@ This project has a persistent, branch-aware memory layer. **Treat the memory bel
 - already working â€” don't batch multiple systems into one commit.  `[3b93e198b093]`
 
 **Flows**
-- assistant: The sheet is organised as **2-tile-tall colour bands** (blue glass, tan, red, magenta) with a doorway column â€” so buildings need a repeating band, not single rows. Let me check the lower rows for roof pieces:  `[65d5e708457c]`
-- queue-operation: <task-notification>  `[6d7b8a6edad6]`
+- queue-operation: commit and push directly to main. let's work more tomorrow  `[8e26e266c9ef]`
+- queue-operation: show me a few ss of the front-end,  some levels, etc  `[fce6b28aee25]`
 
 **API map**
-- Now **System 2: the dev arena**. The Proving Ground exists but is thin â€” it needs every fixture later systems get tested against.  `[ad974e789e48]`
-- assistant: Rather than surgically patch 1845 lines I'd delete at System 10, I'll replace `menu.ts` with a clean single-screen version now, and do the art/feel pass at System 10. First, the drawing utilities available:  `[cce521399bee]` — `menu.ts`
+- assistant: Capture keeps timing out on Coldspine's blizzard layer. The verification passed (`TRIPLE KILL`, 3 enemies, one blast) â€” let me get the picture on a lighter level.  `[d1796e7453d0]`
+- assistant: Input has stopped reaching the page â€” likely a focus casualty of the DOM probe. Let me reload and retest the one remaining route.  `[38943b135670]`
 
 <!-- OMNI-MEMORY:END -->
