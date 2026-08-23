@@ -61,6 +61,19 @@ export interface LevelDef {
    * tileset. Drawing the shape instead makes each card say what its arena is.
    */
   shape?: "flat" | "tower" | "bowl" | "islands" | "city" | "layered";
+  /**
+   * Paint sky under the ground line instead of earth.
+   *
+   * For arenas built over a drop rather than on a floor. See `Background.subsurface_`.
+   */
+  voidBelow?: boolean;
+  /**
+   * Scales the camera's upward framing bias. Omit for the default composition.
+   *
+   * Only a world whose subject is *below* the ground line has any business touching
+   * this — see `Camera.frameUp`.
+   */
+  frameUp?: number;
   /** Optional persistent world hazard, e.g. acid rain. */
   hazard?(game: GameCtx): Actor;
 }

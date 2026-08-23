@@ -2,6 +2,7 @@ import { v } from "../core/math";
 import type { GameCtx } from "../core/types";
 import type { Builder } from "./builder";
 import type { LevelDef, LevelInfo } from "./types";
+import { LANDMARK, SKY_ASSETS } from "./dressing";
 
 /**
  * Coldspine — the winter fortress.
@@ -30,7 +31,7 @@ const OTHER = `${PACK}/Other Tiles1.png`;
 const WINTER = `${PACK}/GandalfHardcore Background layers/Winter BG`;
 
 export const COLDSPINE_ASSETS: readonly string[] = [
-  FLOOR, HOUSE, DECOR, OTHER,
+  FLOOR, HOUSE, DECOR, OTHER, ...SKY_ASSETS,
   `${PACK}/Large Pine Tree.png`, `${PACK}/Pine Trees.png`, `${PACK}/Christmas tree.png`,
   `${PACK}/Torch.png`, `${PACK}/Angel Statue.png`,
   `${WINTER}/Background Castle  Winter.png`,
@@ -55,6 +56,18 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   const pine = (x: number, y: number, s = 1.2, z = 2) =>
     b.prop({ sheet: b.sheet(`${PACK}/Large Pine Tree.png`), tx: 0, ty: 0, tw: 4, th: 5.5,
              x, y, scale: s, z, sway: 0.008 });
+
+  // A flat overcast, sunless. This is the one cold arena and the light has to say so.
+  b.sky(-80, 140, G0 + 12, { heaviness: 0.75, sun: null });
+
+  // Snow scrub, thinning as the ground rises — the approach is open country, the
+  // bailey is a swept yard, and the bluff is bare rock above the treeline.
+  b.dress(-70, 8, G0, { density: 0.6, salt: 1 });
+  b.dress(8, 54, G0 + 5, { density: 0.34, salt: 2 });
+  b.dress(54, 128, G0 + 12, { density: 0.26, salt: 3 });
+  b.dress(-44, -30, G0, { kind: "camp", density: 0.6, pitch: 1.8, salt: 4 });
+  // A graveyard outside the wall. Somebody has taken this fortress before.
+  b.dress(-28, -21, G0, { kind: "graves", density: 0.85, pitch: 2.0, salt: 5 });
 
   // ---------------------------------------------------------------- the approach
   // Long, cold and empty, with the fortress visible the whole way. A player should be
@@ -93,11 +106,13 @@ function build(game: GameCtx, b: Builder): LevelInfo {
 
   b.scaffold({
     x: 44, baseY: G0 + 5, floors: 5, width: 5, floorHeight: 3, material: "concrete",
+    clad: { sheet: house, tx: 2, ty: 3 },
     guards: ["grunt", "guard"], guardEvery: 2,
     arms: { behavior: "sentry", gun: "sniper", range: 70, interval: 2.4 },
   });
   b.scaffold({
     x: 10, baseY: G0 + 5, floors: 4, width: 5, floorHeight: 3, material: "concrete",
+    clad: { sheet: house, tx: 2, ty: 3 },
     guards: ["grunt"], guardEvery: 2,
     arms: { behavior: "sentry", gun: "rifle", range: 50 },
   });
@@ -125,6 +140,7 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   b.enemy("boss", 84, G0 + 12, -1, { behavior: "hunter", gun: "shotgun" });
 
   b.prop({ sheet: b.sheet(`${PACK}/Angel Statue.png`), tx: 0, ty: 0, tw: 2, th: 4, x: 90, y: G0 + 12, z: 2 });
+  b.landmark(LANDMARK.statue, 86, G0 + 12, { scale: 1.4, z: 4 });
   b.wall(98, G0 + 12, 4, 5, "gold", 0.7);
   b.crowd(94, G0 + 12, ["guard"], 2, { behavior: "sentry", gun: "rifle" });
   pine(108, G0 + 12, 1.3);

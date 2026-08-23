@@ -2,6 +2,7 @@ import { v } from "../core/math";
 import type { GameCtx } from "../core/types";
 import type { Builder } from "./builder";
 import type { LevelDef, LevelInfo } from "./types";
+import { LANDMARK, SKY_ASSETS } from "./dressing";
 
 /**
  * Long Meadow — the open valley.
@@ -35,7 +36,7 @@ export const MEADOW_ASSETS: readonly string[] = [
   `${PACK}/Tree1.png`, `${PACK}/Tree3.png`, `${PACK}/Tree4.png`,
   `${PACK}/Weeping Willow1.png`, `${PACK}/Large Pine Tree.png`,
   `${PACK}/Tall Grass.png`, `${PACK}/Pixel Art Wheat.png`, `${PACK}/Large Tent.png`,
-  `${PACK}/Small Tent.png`, `${PACK}/hot air balloon.png`,
+  `${PACK}/Small Tent.png`, `${PACK}/hot air balloon.png`, ...SKY_ASSETS,
   `${PACK}/GandalfHardcore Background layers/Normal BG/Background Castle .png`,
   ...[1, 2, 3, 4, 5].map(
     (n) => `${PACK}/GandalfHardcore Background layers/Normal BG/GandalfHardcore Background layers_layer ${n}.png`,
@@ -62,6 +63,24 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   const grass = (x: number, y: number, z = 12) =>
     b.prop({ sheet: b.sheet(`${PACK}/Tall Grass.png`), tx: 0, ty: 0, tw: 3, th: 1, x, y, z });
 
+  // A sky with weather in it. The painted backdrop switched the procedural clouds off
+  // and nothing replaced them, so the top third of this arena — the widest one in the
+  // game — was one flat colour.
+  b.sky(-80, 160, G0 + 11, { heaviness: 0.45, sun: { x: 22, y: G0 + 19, scale: 5 } });
+
+  // ---------------------------------------------------------------- the dressing
+  // Laid down before the set-pieces so everything authored by hand sits on top of it.
+  // Three bands, one per plateau, at a density that reads as meadow rather than as
+  // wilderness — this is farmland, so it is scrubby rather than overgrown.
+  b.dress(-70, 24, G0, { density: 0.62, salt: 1 });
+  b.dress(24, 60, G0 + 4, { density: 0.5, salt: 2 });
+  b.dress(60, 148, G0 + 1, { density: 0.58, salt: 3 });
+  // Two worked patches: somebody's camp at the near end and the manor's yard at the
+  // far one. Clutter rather than scrub, so the eye can tell the lived-in ground from
+  // the walk between them.
+  b.dress(-46, -30, G0, { kind: "camp", density: 0.7, pitch: 1.7, salt: 4 });
+  b.dress(74, 100, G0 + 1, { kind: "camp", density: 0.45, pitch: 2.1, salt: 5 });
+
   // ---------------------------------------------------------------- 1. the camp
   // Close to the spawn, small, and full of powder. The first thing a player shoots in
   // this arena should go off, so they learn immediately that range is not a penalty.
@@ -80,6 +99,12 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   b.spriteWall({ sheet: house, tx: 1, ty: 0, cols: 5, rows: 7, x: -22, baseY: G0, material: "brick" });
   b.spriteWall({ sheet: house, tx: 8, ty: 0, cols: 5, rows: 7, x: -14, baseY: G0, material: "wood" });
   b.prop({ sheet: b.sheet(`${PACK}/Pixel Art Wheat.png`), tx: 0, ty: 0, tw: 4, th: 2, x: -8, y: G0, z: 12 });
+  // The scarecrow is the arena's one joke that is not made of physics: it stands in the
+  // field at exactly stickman height, and at four hundred feet it is the thing players
+  // shoot first by mistake.
+  b.landmark(LANDMARK.scarecrow, -5, G0, { z: 4 });
+  b.landmark(LANDMARK.washingLine, -30, G0, { z: 4 });
+  b.landmark(LANDMARK.marketStall, -28.5, G0, { z: 5 });
   b.gunner("guard", -25, G0, 1, { behavior: "patrol", patrol: 4, gun: "rifle", range: 45 });
   b.gunner("grunt", -12, G0, -1, { behavior: "patrol", patrol: 4, gun: "smg" });
   b.block(-18, G0 + 0.55, 3.4, 1.1, "concrete");
@@ -114,6 +139,7 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   b.enemy("boss", 96, G0 + 1, -1, { behavior: "hunter", gun: "shotgun" });
 
   // ---------------------------------------------------------------- 5. the treasury
+  b.landmark(LANDMARK.statue, 118, G0 + 1, { scale: 1.6, z: 4 });
   b.wall(112, G0 + 1, 5, 6, "gold", 0.7);
   b.crowd(106, G0 + 1, ["guard", "guard"], 2.2, { behavior: "sentry", gun: "rifle" });
   b.block(102, G0 + 1.55, 3.4, 1.1, "concrete");

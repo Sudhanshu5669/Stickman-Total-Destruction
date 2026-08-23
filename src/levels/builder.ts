@@ -1,4 +1,4 @@
-import { Block, Terrain, type MaterialId, type TerrainSkin } from "../entities/block";
+import { Block, Terrain, type BlockSkin, type MaterialId, type TerrainSkin } from "../entities/block";
 import { SpriteProp, type SpritePropOptions } from "../entities/spriteprop";
 import { PPM, sheet, type Sheet } from "../render/sprites";
 import { Enemy, combat, type CombatOptions, type CombatSpec, type EnemyKind } from "../entities/enemy";
@@ -6,6 +6,12 @@ import type { Actor, GameCtx } from "../core/types";
 import { chance, pick, rand } from "../core/math";
 import type { Theme } from "../render/theme";
 import { Decor } from "./hazards";
+import {
+  BIRDS, CAMP, CLOUDS, GRAVES, roll, seasonSet, SUN, weighted, type Piece,
+} from "./dressing";
+
+/** The platformer pack's scenery sheet. Every non-city arena already preloads it. */
+const DECOR_SHEET = "GandalfHardcore FREE Platformer Assets/Decor.png";
 
 /**
  * Structures are plain stacks of dynamic blocks — no pre-scored break points, no
@@ -177,8 +183,23 @@ export class Builder {
     return this.track(this.game.add(new Decor(this.game, x, y, kind, tint, z)));
   }
 
-  block(x: number, y: number, w: number, h: number, material: MaterialId, angle = 0, anchored = true) {
-    return this.track(this.game.add(new Block(this.game, { x, y, w, h, material, angle, anchored })));
+  block(
+    x: number, y: number, w: number, h: number, material: MaterialId,
+    angle = 0, anchored = true, skin?: BlockSkin,
+  ) {
+    return this.track(this.game.add(new Block(this.game, { x, y, w, h, material, angle, anchored, skin })));
+  }
+
+  /**
+   * A skin that tiles one source cell across a block of any size.
+   *
+   * `spriteBlock` maps one tile to one block, which is right for a wall built cell by
+   * cell and wrong for a six-metre floor slab: the tile stretches over it and the
+   * pixels smear. This repeats the cell instead, so a beam or a slab is clad at the
+   * artwork's own scale whatever length it happens to be.
+   */
+  private cell(sheet: Sheet, tx: number, ty: number): BlockSkin {
+    return { sheet, sx: tx * PPM, sy: ty * PPM, sw: PPM, sh: PPM, tile: true };
   }
 
   /** A block that is free from the start — loose crates, barrels, rubble. */
@@ -553,6 +574,181 @@ export class Builder {
     return y;
   }
 
+  // ------------------------------------------------------------- dressing
+
+  /**
+   * Scatters scenery along a run of ground.
+   *
+   * The bulk layer described in `levels/dressing.ts`. One call dresses a whole band:
+   *
+   * ```ts
+   * b.dress(-70, 26, G0);                       // wild turf
+   * b.dress(-46, -30, G0, { kind: "camp" });    // somebody lives here
+   * ```
+   *
+   * Placement walks the span at a fixed pitch and rejects most candidates, rather than
+   * placing N items at random x. Rejection sampling on a grid is what keeps the spacing
+   * *irregular but bounded* — pure random x clumps three rocks on one metre and leaves
+   * a twenty-metre hole, which is precisely the look the hand-placed pass already had.
+   *
+   * Everything is seeded off world position, so an arena's scenery is part of the arena
+   * rather than a different level every time it loads.
+   *
+   * @param density 0..1 — roughly the fraction of candidate slots that get filled.
+   */
+  dress(x0: number, x1: number, y: number, o: {
+    kind?: "wild" | "camp" | "graves";
+    density?: number;
+    /** Draw order. The default sits scenery behind the things you can shoot. */
+    z?: number;
+    /** Distinguishes two bands at the same x so they do not get identical scenery. */
+    salt?: number;
+    /** Metres between candidate slots. */
+    pitch?: number;
+  } = {}) {
+    const sheet = this.decorSheet();
+    if (!sheet) return;
+
+    const kind = o.kind ?? "wild";
+    const density = o.density ?? 0.62;
+    const z = o.z ?? 3;
+    const salt = o.salt ?? 0;
+    const pitch = o.pitch ?? 1.5;
+    const season = seasonSet(this.theme.groundRow);
+
+    // Weighted by *kind*, not uniform: turf is mostly small things with the occasional
+    // stone, because a field of evenly-mixed rocks and shrubs reads as a rockery.
+    const table = (r: number): Piece[] => {
+      if (kind === "camp") return CAMP;
+      if (kind === "graves") return GRAVES;
+      if (r < 0.42) return season.tufts;
+      if (r < 0.74) return season.rocks;
+      if (r < 0.96) return season.bushes;
+      return season.boulders;
+    };
+
+    const lo = Math.min(x0, x1);
+    const hi = Math.max(x0, x1);
+    for (let x = lo; x < hi; x += pitch) {
+      if (roll(x, 11 + salt) > density) continue;
+      const piece = weighted(table(roll(x, 29 + salt)), roll(x, 47 + salt));
+      // Jittered off the slot so the pitch itself never becomes visible as a rhythm.
+      const jx = x + (roll(x, 63 + salt) - 0.5) * pitch * 0.8;
+      this.prop({
+        sheet, tx: piece.tx, ty: piece.ty, tw: piece.tw, th: piece.th,
+        x: jx, y, scale: piece.m, sway: piece.sway ?? 0,
+        flip: roll(x, 71 + salt) < 0.5,
+        // A metre of depth spread, so a band of scenery has a near edge and a far one
+        // instead of standing in a single rank.
+        z: z + (roll(x, 83 + salt) < 0.3 ? 6 : 0),
+      });
+    }
+  }
+
+  /**
+   * Places one named piece of scenery from the decor sheet.
+   *
+   * For the things a level wants *there*, specifically — the scarecrow in the field,
+   * the statue in the courtyard — as opposed to the bulk `dress` pass.
+   */
+  landmark(piece: Piece, x: number, y: number, o: { scale?: number; z?: number; flip?: boolean } = {}) {
+    const sheet = this.decorSheet();
+    if (!sheet) return;
+    this.prop({
+      sheet, tx: piece.tx, ty: piece.ty, tw: piece.tw, th: piece.th,
+      x, y, scale: (o.scale ?? 1) * piece.m, sway: piece.sway ?? 0,
+      z: o.z ?? 4, flip: o.flip ?? false,
+    });
+  }
+
+  /**
+   * The platformer pack's decor sheet, or nothing.
+   *
+   * Grid City is built from a different pack entirely and has no business growing
+   * shrubs, so the city theme opts out by returning null rather than by every call site
+   * remembering not to ask.
+   */
+  private decorSheetCache: Sheet | null = null;
+  private decorSheet(): Sheet | null {
+    if (this.theme.id === "city") return null;
+    return (this.decorSheetCache ??= this.sheet(DECOR_SHEET));
+  }
+
+  /**
+   * Weather and wildlife, over the whole arena.
+   *
+   * One call per level. Clouds are spread across the span at three altitudes so the sky
+   * has depth rather than a single rank of stickers, birds are hung high and small, and
+   * the sun is optional because half these worlds are overcast.
+   *
+   * All of it is seeded off world position, so an arena's sky is as fixed as its ground.
+   *
+   * @param skyY The height the backdrop's own treeline or skyline tops out at. Clouds
+   *             are hung just above it: the painted layers are drawn before any actor,
+   *             so a cloud placed level with the trees would sit *in front* of them and
+   *             read as fog on the near ground rather than as weather behind it.
+   */
+  sky(x0: number, x1: number, skyY: number, o: {
+    clouds?: number;
+    birds?: number;
+    /** Bias toward the bigger sprites. 0 is wisps, 1 is weather. */
+    heaviness?: number;
+    sun?: { x: number; y: number; scale?: number } | null;
+  } = {}) {
+    // Grid City's backdrop paints its own sky, and a fluffy white cloud over a
+    // rain-lit skyline reads as a mistake rather than as weather.
+    if (this.theme.id === "city") return;
+
+    // One cloud per dozen metres and a flock per forty. The frame is about 35 m wide,
+    // so that is roughly three clouds and one flock on screen at any time — enough that
+    // the sky is never empty, sparse enough that it never becomes the subject.
+    const count = o.clouds ?? Math.max(5, Math.round((x1 - x0) / 12));
+    const birds = o.birds ?? Math.max(2, Math.round((x1 - x0) / 40));
+    const heaviness = o.heaviness ?? 0.5;
+    const span = x1 - x0;
+
+    for (let i = 0; i < count; i++) {
+      const r = roll(i * 7.3, 5);
+      const x = x0 + ((i + roll(i * 3.1, 9) * 0.8) / count) * span;
+      // Three altitudes, and the higher a cloud is the smaller it is drawn — cheap
+      // aerial perspective, and the reason this does not read as one flat rank.
+      const rank = i % 3;
+      const pick = Math.min(
+        CLOUDS.length - 1,
+        Math.floor((roll(i * 5.7, 13) * 0.55 + heaviness * 0.45) * CLOUDS.length),
+      );
+      const c = CLOUDS[pick];
+      const scale = (1.5 - rank * 0.32) * (0.8 + r * 0.5);
+      this.prop({
+        sheet: this.sheet(c.path), tx: 0, ty: 0, tw: c.tw, th: c.th,
+        x, y: skyY + 1.5 + rank * 4.5 + r * 3.5,
+        scale, z: -8 - rank, alpha: 0.9 - rank * 0.12,
+        flip: roll(i * 11.9, 17) < 0.5,
+        // Barely-there drift. Enough that a still frame and a live one differ.
+        sway: 0.006 + r * 0.006,
+      });
+    }
+
+    for (let i = 0; i < birds; i++) {
+      const b = BIRDS[Math.floor(roll(i * 4.1, 23) * BIRDS.length)];
+      this.prop({
+        sheet: this.sheet(b.path), tx: 0, ty: 0, tw: b.tw, th: b.th,
+        x: x0 + ((i + 0.5) / birds) * span + roll(i * 6.7, 29) * 14,
+        y: skyY + 3 + roll(i * 8.3, 31) * 8,
+        scale: 1.6 + roll(i * 2.3, 37) * 1.4,
+        z: -6, alpha: 0.85, sway: 0.05,
+        flip: roll(i * 9.1, 41) < 0.5,
+      });
+    }
+
+    if (o.sun) {
+      this.prop({
+        sheet: this.sheet(SUN.path), tx: 0, ty: 0, tw: SUN.tw, th: SUN.th,
+        x: o.sun.x, y: o.sun.y, scale: o.sun.scale ?? 5, z: -12, alpha: 0.9,
+      });
+    }
+  }
+
   // ------------------------------------------------------------- spans
   //
   // Everything below takes explicit edges. See the coordinate note on the class.
@@ -570,9 +766,36 @@ export class Builder {
     return this.ground(Math.min(x0, x1) + w / 2, top - depth / 2, w, depth);
   }
 
-  /** `groundSpan` with a tiled surface, in one call — every pixel-art arena wants this. */
-  skinnedGround(x0: number, x1: number, top: number, sheet: Sheet, tx = 0, ty = 0, depth = 6) {
+  /**
+   * `groundSpan` with a tiled surface, in one call — every pixel-art arena wants this.
+   *
+   * The row defaults to the *theme's* season rather than to zero. Passing it at the
+   * call site is how Ironhold ended up with summer turf under an autumn sky and how
+   * Coldspine ran a green stripe across a snowfield: the sheets draw three seasons and
+   * every author took the first one. See `Theme.groundRow`.
+   */
+  skinnedGround(
+    x0: number, x1: number, top: number,
+    sheet: Sheet = this.groundSheet(), tx = 0, ty = this.theme.groundRow, depth = 6,
+  ) {
     return this.skin(this.groundSpan(x0, x1, top, depth), { sheet, tx, ty });
+  }
+
+  /**
+   * The theme's own terrain sheet, cached.
+   *
+   * Every span helper below reaches for this so that a platform, a terrace and the
+   * floor of a pit are all made of the same material as the ground outside them —
+   * which is what a level author means by "ground" and what none of them used to get.
+   */
+  private groundSheetCache: Sheet | null = null;
+  groundSheet(): Sheet {
+    return (this.groundSheetCache ??= this.sheet(this.theme.groundSheet));
+  }
+
+  /** The terrain skin this world's ground is tiled with. */
+  groundSkin(): TerrainSkin {
+    return { sheet: this.groundSheet(), tx: 0, ty: this.theme.groundRow };
   }
 
   /**
@@ -584,7 +807,13 @@ export class Builder {
    */
   shelf(x0: number, x1: number, top: number, thickness = 1.2) {
     const w = Math.abs(x1 - x0);
-    return this.ledge(Math.min(x0, x1) + w / 2, top - thickness / 2, w, thickness);
+    // Skinned like the ground, because it *is* ground: the untextured version left the
+    // Quarry's terraces and the Drift's whole island chain as flat grey-brown boxes in
+    // arenas whose every other surface was tiled artwork.
+    return this.skin(
+      this.ledge(Math.min(x0, x1) + w / 2, top - thickness / 2, w, thickness),
+      this.groundSkin(),
+    );
   }
 
   /**
@@ -606,20 +835,29 @@ export class Builder {
     const stepH = depth / (steps + 1);
     const stepW = (halfW * 0.42) / steps;
 
-    this.groundSpan(cx - halfW, cx + halfW, floorY, 6);
+    this.skinnedGround(cx - halfW, cx + halfW, floorY);
 
     // The two walls, as stacks of terrain, each course inset from the one below.
+    //
+    // Full-depth slabs, not thin shelves. A shelf is a metre of rock with nothing
+    // underneath it, so a stepped wall built out of shelves left the whole inside face
+    // of the bowl as open air with the *backdrop* showing through — a flat brown plane
+    // where twelve metres of quarried rock should be, which was most of the frame in
+    // the one arena you spend the whole time looking into. Each course now runs from
+    // its own surface down past the floor, so the wall is solid all the way.
     for (let i = 0; i < steps; i++) {
       const y = floorY + stepH * (i + 1);
       const inset = halfW - stepW * (steps - i);
-      this.shelf(cx - halfW - 2, cx - inset, y, stepH + 0.4);
-      this.shelf(cx + inset, cx + halfW + 2, y, stepH + 0.4);
+      const deep = y - floorY + 6;
+      this.skinnedGround(cx - halfW - 2, cx - inset, y, undefined, 0, undefined, deep);
+      this.skinnedGround(cx + inset, cx + halfW + 2, y, undefined, 0, undefined, deep);
     }
 
     // The rim, running out to either side. Generous, so the player has somewhere to
     // stand and look down into the thing before committing to it.
-    this.groundSpan(cx - halfW - 40, cx - halfW - 1.5, rimY, 6);
-    this.groundSpan(cx + halfW + 1.5, cx + halfW + 40, rimY, 6);
+    const rimDeep = Math.max(6, rimY - floorY + 6);
+    this.skinnedGround(cx - halfW - 40, cx - halfW - 1.5, rimY, undefined, 0, undefined, rimDeep);
+    this.skinnedGround(cx + halfW + 1.5, cx + halfW + 40, rimY, undefined, 0, undefined, rimDeep);
     return { floorY, rimY, stepH };
   }
 
@@ -643,12 +881,22 @@ export class Builder {
     width: number;
     floorHeight?: number;
     material: MaterialId;
+    /**
+     * Cladding: a sheet and a source cell, tiled over every column, slab and landing.
+     *
+     * Without it a scaffold is a lattice of flat grey rectangles, which is exactly what
+     * Ironhold's twelve-storey centrepiece and Coldspine's two watchtowers were — the
+     * only structures in the game that still looked like a physics test scene, standing
+     * in the middle of arenas whose every other surface was painted artwork.
+     */
+    clad?: { sheet: Sheet; tx: number; ty: number };
     /** Enemies placed on the landing of every Nth floor. */
     guards?: EnemyKind[];
     guardEvery?: number;
     arms?: CombatOptions | null;
   }) {
     const fh = opts.floorHeight ?? 3.2;
+    const skin = opts.clad ? this.cell(opts.clad.sheet, opts.clad.tx, opts.clad.ty) : undefined;
     const colW = 0.5;
     const half = opts.width / 2;
     const every = opts.guardEvery ?? 2;
@@ -662,17 +910,17 @@ export class Builder {
       // a doorway — and both carry the same load, because both are anchored.
       const closedX = openRight ? opts.x - half + colW / 2 : opts.x + half - colW / 2;
       const openX = openRight ? opts.x + half - colW / 2 : opts.x - half + colW / 2;
-      this.block(closedX, y + fh / 2, colW, fh, opts.material);
+      this.block(closedX, y + fh / 2, colW, fh, opts.material, 0, true, skin);
       const lintel = fh * 0.3;
-      this.block(openX, y + fh - lintel / 2, colW, lintel, opts.material);
+      this.block(openX, y + fh - lintel / 2, colW, lintel, opts.material, 0, true, skin);
 
       y += fh;
-      this.block(opts.x, y + 0.2, opts.width, 0.4, opts.material);
+      this.block(opts.x, y + 0.2, opts.width, 0.4, opts.material, 0, true, skin);
 
       // Landing on the open side — the thing that makes the climb a route rather than
       // a wall with gaps in it.
       const lx = opts.x + (openRight ? half + 1.4 : -half - 1.4);
-      this.block(lx, y + 0.2, 3, 0.4, opts.material);
+      this.block(lx, y + 0.2, 3, 0.4, opts.material, 0, true, skin);
 
       if (opts.guards?.length && f % every === 0) {
         const k = opts.guards[Math.floor(f / every) % opts.guards.length];

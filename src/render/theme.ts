@@ -104,6 +104,22 @@ export interface Theme {
   ambientAlpha?: number;
   /** Whether terrain sprouts tufts along its top edge. Dead worlds shouldn't. */
   vegetation: boolean;
+  /**
+   * Which season the pack's floor sheets are read from.
+   *
+   * `Floor Tiles1/2.png` are one 3x3 autotile drawn three times down the sheet — green
+   * at row 0, autumn at row 6, snow at row 12 — and every level in the game asked for
+   * row 0 because that is the default. So Ironhold laid green summer turf under an
+   * autumn sky and Coldspine ran a bright green stripe along the top of a snowfield.
+   *
+   * Putting the row on the *theme* rather than at the call site is what stops that
+   * happening again: an arena declares which world it is in once, and every ground
+   * slab, ledge, terrace and island it builds is skinned to match without the author
+   * repeating a magic number twenty times.
+   */
+  groundRow: number;
+  /** Which of the pack's two floor sheets this world's terrain is tiled with. */
+  groundSheet: string;
   /** Painted backdrop. When set, it replaces sky, clouds, skyline and ridges entirely. */
   sprites?: SpriteBackdrop;
 }
@@ -114,6 +130,13 @@ const BG = `${PACK_BG}/Normal BG`;
 const BG_AUTUMN = `${PACK_BG}/Autumn BG`;
 const BG_WINTER = `${PACK_BG}/Winter BG`;
 const BG_CITY = "GandalfHardcore City Tiles";
+
+/** The pack's two floor autotiles, and the row each season starts on. */
+export const FLOOR_1 = "GandalfHardcore FREE Platformer Assets/Floor Tiles1.png";
+export const FLOOR_2 = "GandalfHardcore FREE Platformer Assets/Floor Tiles2.png";
+/** City Tiles' own floor sheet, which has no seasons. */
+const FLOOR_CITY = `${BG_CITY}/GandalfHardcore city tiles 32x32.png`;
+export const SEASON = { green: 0, autumn: 6, snow: 12 } as const;
 
 /**
  * The platformer pack's five parallax plates, as one backdrop.
@@ -157,8 +180,13 @@ export const THEMES: Record<string, Theme> = {
     skylineFar: "#86bbdb",
     windowColor: "rgba(255,216,128,0.55)",
     cloudColor: "255,255,255",
-    cloudAlpha: 0.9,
-    cloudCount: 18,
+    // Zero on purpose. The procedural clouds are soft-edged blobs with a blur under
+    // them, and this is the only theme that still drew them — against the pixel-art
+    // buildings and the pixel-art arsenal they read as a different game showing
+    // through. The Proving Ground hangs the pack's own cloud sprites instead, via
+    // `Builder.sky`, which is what every painted arena now does too.
+    cloudAlpha: 0,
+    cloudCount: 0,
     sun: { xFrac: 0.78, yOffset: 300, color: "255,244,196", radius: 300 },
     moon: null,
     stars: 0,
@@ -176,6 +204,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#ffc46a",
     ambientAlpha: 0.07,
     vegetation: true,
+    groundRow: SEASON.green,
+    groundSheet: FLOOR_1,
   },
 
   /**
@@ -218,6 +248,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#1a3a7a",
     ambientAlpha: 0.2,
     vegetation: true,
+    groundRow: SEASON.green,
+    groundSheet: FLOOR_1,
   },
 
   /**
@@ -259,6 +291,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#8a2eff",
     ambientAlpha: 0.08,
     vegetation: true,
+    groundRow: SEASON.green,
+    groundSheet: FLOOR_1,
   },
 
   /**
@@ -301,6 +335,8 @@ export const THEMES: Record<string, Theme> = {
     ambientAlpha: 0.08,
     // Nothing grows on Mars.
     vegetation: false,
+    groundRow: SEASON.autumn,
+    groundSheet: FLOOR_1,
   },
 
   /**
@@ -349,6 +385,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#ffe6b0",
     ambientAlpha: 0.05,
     vegetation: false,
+    groundRow: SEASON.green,
+    groundSheet: FLOOR_1,
     /**
      * The six plates are one picture the artist sliced, not six independent bands: they
      * are drawn at an identical size and anchor, and *only* the scroll rate differs.
@@ -415,6 +453,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#ffc27a",
     ambientAlpha: 0.08,
     vegetation: false,
+    groundRow: SEASON.autumn,
+    groundSheet: FLOOR_2,
     sprites: seasonBackdrop(BG_AUTUMN, "Background Castle Autumn.png", "#dda86a"),
   },
 
@@ -459,6 +499,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#cfe4f5",
     ambientAlpha: 0.1,
     vegetation: false,
+    groundRow: SEASON.snow,
+    groundSheet: FLOOR_2,
     sprites: seasonBackdrop(BG_WINTER, "Background Castle  Winter.png", "#a8c6da"),
   },
 
@@ -500,6 +542,8 @@ export const THEMES: Record<string, Theme> = {
     ambient: "#8fa8d8",
     ambientAlpha: 0.07,
     vegetation: false,
+    groundRow: SEASON.green,
+    groundSheet: FLOOR_CITY,
     sprites: {
       sky: "#4a5878",
       layers: [

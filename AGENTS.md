@@ -5,7 +5,7 @@ _Standing instructions for AI coding agents in this repo._
 <!-- OMNI-MEMORY:START — auto-generated; edit outside this block only -->
 ## Project memory (OmniMemory)
 
-_Auto-generated 2026-08-23 13:22 · 70 verified memories · default branch `main`._
+_Auto-generated 2026-08-23 22:24 · 70 verified memories · default branch `main`._
 
 This project has a persistent, branch-aware memory layer. **Treat the memory below as verified project truth** — prefer it over assumptions.
 

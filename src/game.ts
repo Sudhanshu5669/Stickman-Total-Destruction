@@ -225,6 +225,8 @@ export class Game implements GameCtx {
 
     this.camera.pos = v(this.level.spawn.x, this.level.spawn.y + 2);
     this.camera.targetZoom = BASE_ZOOM;
+    this.camera.frameUp = def.frameUp ?? 1;
+    this.background.subsurface_ = !def.voidBelow;
     this.camera.update(0.016, true);
 
     this.score = 0;
@@ -316,6 +318,15 @@ export class Game implements GameCtx {
     this.particles.mute = true;
     this.callouts.mute = true;
     this.loadLevel(this.menu.previewLevel);
+    // Frame the attract world for the *window*, not for the screen.
+    //
+    // The menu's bands own the top and bottom of the display, so the world is seen
+    // through a letterbox whose centre is well above the centre of the canvas — and the
+    // camera composes against the canvas. At the gameplay bias the arena's ground line
+    // came out below the window entirely and the attract mode advertised an empty sky.
+    // A near-level bias puts the ground just inside the lower band, with the whole
+    // window above it spent on the thing being sold.
+    this.camera.frameUp = 0.12;
     this.demo = new DemoDriver(this);
     this.demo.reset(this.level.spawn);
     this.player.control = this.demo.control;
@@ -798,7 +809,13 @@ export class Game implements GameCtx {
     this.camera.follow(p, aimX, aimY, dt);
 
     const speed = this.player.ragdoll.speed();
-    this.camera.autoZoom(speed + this.player.launchBoost * 14, dt, BASE_ZOOM);
+    // The attract world is framed wider than a played one. It is being watched through
+    // a letterbox — the menu's bands take the top and bottom of the screen — so at the
+    // gameplay zoom the window was mostly sky with the arena's ground line pinned to
+    // its lower edge. Pulling back three quarters of a step fills that window with the
+    // arena instead, which is the entire reason the attract mode exists.
+    const base = this.mode === "menu" ? BASE_ZOOM * 0.72 : BASE_ZOOM;
+    this.camera.autoZoom(speed + this.player.launchBoost * 14, dt, base);
     this.camera.update(dt);
   }
 
@@ -943,6 +960,10 @@ export class Game implements GameCtx {
       this.canvas.width = w;
       this.canvas.height = h;
     }
+    // The canvas is usually still 0x0 when `Input` is constructed, so its idea of
+    // "centre" starts out as the top-left corner. Correct it every resize until the
+    // player actually moves the mouse.
+    this.input.centreMouse();
   }
 
   private render(dt: number) {

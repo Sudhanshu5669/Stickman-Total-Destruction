@@ -2,11 +2,12 @@ import { ARENAS } from "../levels";
 import type { LevelDef } from "../levels/types";
 import { clamp, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
-import { THEMES } from "../render/theme";
 import { settings, SHAKE_LABELS } from "./settings";
 import { quality, TIER_LABELS } from "./quality";
 import { progress } from "./progress";
 import { AMMO_BY_ID } from "../weapons/ammo";
+import { gunSprite } from "../render/gunart";
+import { ammoSprite } from "../render/ammoart";
 import { notchedPanel, INK, CREAM, GOLD, PANEL, PANEL_LIT, PANEL_DIM, MUTED } from "./chrome";
 
 /**
@@ -30,12 +31,33 @@ import { notchedPanel, INK, CREAM, GOLD, PANEL, PANEL_LIT, PANEL_DIM, MUTED } fr
  * language is how the two halves of an interface drift apart. What is left here is what
  * is specific to the front end:
  *
- * 1. **The arena previews are painted from the arenas' own themes and shapes**, so a
- *    card shows the place rather than a coloured rectangle with a name on it.
- * 2. **One accent per arena**, taken from the level definition, so the seven read as
- *    seven places rather than seven rows of a list.
+ * ### The arena is the poster
+ *
+ * The first version of this screen laid a flat 72% scrim over the whole viewport and
+ * floated a row of painted thumbnails on top of it. That got two things wrong at once.
+ *
+ * The scrim wasted the best asset the menu has. Selecting an arena rebuilds the world
+ * behind this screen and plays it — a real fight, in the real arena, with the real
+ * arsenal — and it was being muted to near-black so that nothing showed through but a
+ * grey wash. Two thirds of a 1600x900 frame was that wash with nothing drawn on it.
+ *
+ * And the thumbnails were competing with the thing they were previews *of*. A 168-pixel
+ * painting of an arena is never going to beat the arena itself running at full size
+ * directly behind it, so the card no longer tries: it is a name plate.
+ *
+ * So the screen is now built as **two solid bands and a window**. An ink band across
+ * the top carries the wordmark; an ink band across the bottom carries the picker, the
+ * blurb and PLAY. Between them the world plays almost unscrimmed. Nothing floats, there
+ * is no dead middle, and what sells the game is the game.
+ *
+ * ### The cast is on the box
+ *
+ * A menu for a game about a stickman with a chicken cannon had no stickman and no
+ * chicken on it. Every pixel of it was type. `drawMascot` puts the character on his own
+ * title screen, drawn in the same black vector language the game draws him in and
+ * holding a real sprite out of `render/gunart.ts` — not an illustration of the game,
+ * the actual thing, which is the only kind of mascot worth having.
  */
-
 
 
 /** Things the menu handles by itself. `click()` applies them and reports `none`. */
@@ -138,159 +160,295 @@ export class Menu {
     this.regions = [];
     const k = clamp(Math.min(w, h) / 780, 0.55, 1.5);
 
-    // A flat scrim, not a gradient. The attract-mode world plays behind it and has to
-    // be visible enough to be an advert for itself and quiet enough to lose to the type.
-    ctx.fillStyle = "rgba(10,12,18,0.72)";
-    ctx.fillRect(0, 0, w, h);
+    // Two solid bands and a window between them. See the note at the top of the file:
+    // the world playing behind this screen is the best thing on it, and the previous
+    // full-screen scrim spent two thirds of the frame hiding it.
+    const topH = Math.round(Math.min(h * 0.17, 104 * k));
+    // Measured from the content, not taken as a fraction of the viewport. A band sized
+    // by fraction is a band with a hole in the bottom of it at some window shapes, and
+    // every pixel it takes that the picker does not need is a pixel of arena hidden.
+    const layout = this.pickerLayout(w, h, k);
+    const botY = h - layout.height;
 
-    this.drawTitle(ctx, w, k);
-    const cardsBottom = this.drawArenaRow(ctx, w, h, k);
-    this.drawDetail(ctx, w, h, k, cardsBottom);
-    this.drawGearButton(ctx, w, k);
+    // A light wash over the live world, only across the window. Enough to sit the arena
+    // one step behind the interface; nowhere near enough to lose it.
+    ctx.fillStyle = "rgba(10,12,18,0.26)";
+    ctx.fillRect(0, topH, w, botY - topH);
+
+    this.drawBand(ctx, 0, w, topH, k, "bottom");
+    this.drawBand(ctx, botY, w, layout.height, k, "top");
+
+    this.drawTitle(ctx, w, topH, k);
+    this.drawGearButton(ctx, w, topH, k);
+    this.drawMascot(ctx, w, botY, k);
+    this.drawPicker(ctx, w, botY, layout, k);
+
     if (this.optionsOpen) this.drawOptions(ctx, w, h, k);
 
     this.hover(this.lastMouse.x, this.lastMouse.y);
   }
 
   /**
-   * The wordmark.
+   * One of the two solid bands, with a notched inner edge and an accent rule on it.
    *
-   * Two passes offset by a pixel — ink under cream — rather than a shadow. A blurred
-   * shadow is the single most web-looking thing a canvas title can do; a hard offset is
-   * what a sprite-based title would look like, and it costs the same.
+   * The notches face the window rather than the screen edge: they are what makes a band
+   * read as a piece of chrome laid over the world instead of as a letterbox bar, and a
+   * notch on an edge that runs off the screen is invisible anyway.
    */
-  private drawTitle(ctx: Ctx, w: number, k: number) {
-    const size = 42 * k;
-    const y = 52 * k;
-    text(ctx, "STICKMAN ASCENSION", w / 2 + 3 * k, y + 3 * k, size, INK, "center", "middle", 900);
-    text(ctx, "STICKMAN ASCENSION", w / 2, y, size, CREAM, "center", "middle", 900);
-    // A rule either side of the subtitle, which reads as chrome rather than as text.
-    const sub = "PICK SOMETHING TO BREAK";
-    const subW = measure(ctx, sub, 12 * k, 800);
-    text(ctx, sub, w / 2, y + 28 * k, 12 * k, GOLD, "center", "middle", 800);
-    ctx.fillStyle = "rgba(255,210,63,0.45)";
-    ctx.fillRect(w / 2 - subW / 2 - 34 * k, y + 27 * k, 24 * k, 2 * k);
-    ctx.fillRect(w / 2 + subW / 2 + 10 * k, y + 27 * k, 24 * k, 2 * k);
+  private drawBand(
+    ctx: Ctx, y: number, w: number, h: number, k: number, edge: "top" | "bottom",
+  ) {
+    const accent = this.previewLevel.accent;
+    ctx.fillStyle = INK;
+    ctx.fillRect(0, y, w, h);
+
+    const rule = Math.max(2, Math.round(3 * k));
+    const notch = Math.max(3, Math.round(4 * k));
+    const inner = edge === "top" ? y : y + h - rule;
+    ctx.fillStyle = accent;
+    ctx.fillRect(0, inner, w, rule);
+
+    ctx.fillStyle = PANEL_DIM;
+    const ny = edge === "top" ? y + rule : y + h - rule - notch;
+    for (let nx = 0; nx < w; nx += notch * 5) ctx.fillRect(nx, ny, notch * 2, notch);
   }
 
   /**
-   * The seven arena cards.
+   * The wordmark.
    *
-   * One row on a desktop frame, two on a phone. The break is decided by the card width
-   * a single row would produce rather than by a viewport breakpoint: seven across a
-   * 390 px portrait phone is a 47 px card, which is smaller than a fingertip and far
-   * too small to read a name in. Below the threshold the row splits 4 + 3 — the only
-   * balanced split of seven — because a wrap that leaves one orphan card on its own
-   * line reads as a bug rather than as a grid.
+   * Two passes offset by a pixel - ink under cream - rather than a shadow. A blurred
+   * shadow is the single most web-looking thing a canvas title can do; a hard offset is
+   * what a sprite-based title would look like, and it costs the same.
    *
-   * @returns the Y the cards end at, so the detail block can sit under them.
+   * The second word takes the selected arena's accent, so picking a different arena
+   * repaints the game's own name. It is the cheapest way there is to make a static
+   * screen answer back to what the player is doing.
    */
-  private drawArenaRow(ctx: Ctx, w: number, h: number, k: number): number {
-    const n = ARENAS.length;
-    const gap = 10 * k;
-    const maxW = 168 * k;
-    /** Card width if all seven shared one row. */
-    const flat = Math.min(maxW, (w - 48 * k - gap * (n - 1)) / n);
-    const split = flat < 110 * k;
-    const perRow = split ? 4 : n;
-    const cardW = split
-      ? Math.min(maxW, (w - 48 * k - gap * (perRow - 1)) / perRow)
-      : flat;
-    const cardH = cardW * 1.0;
-    const y = h * (split ? 0.16 : 0.2);
+  private drawTitle(ctx: Ctx, w: number, bandH: number, k: number) {
+    const a = "STICKMAN ";
+    const b = "ASCENSION";
+    const accent = this.previewLevel.accent;
+    const y = bandH * 0.4;
 
-    /** Rows are centred one at a time, so the short last row sits under the middle. */
-    const rowOf = (i: number) => Math.floor(i / perRow);
-    const countIn = (row: number) => Math.min(perRow, n - row * perRow);
-    const originOf = (row: number) => {
-      const c = countIn(row);
-      return w / 2 - (c * cardW + (c - 1) * gap) / 2;
-    };
+    // Shrunk to fit rather than clipped. The carnage readout and the cog own the right
+    // end of this band, so the title gets what is left of the width, not all of it.
+    let size = Math.min(44 * k, bandH * 0.44);
+    const room = w - 200 * k;
+    while (size > 10 && measure(ctx, a + b, size, 900) > room) size -= 0.5;
 
-    ARENAS.forEach((def, i) => {
-      const chosen = i === this.sel;
-      const row = rowOf(i);
-      const x = originOf(row) + (i - row * perRow) * (cardW + gap);
-      const lift = chosen ? 6 * k : 0;
-      const cy = y + row * (cardH + gap) - lift;
-      const hot = this.isHot(x, cy, cardW, cardH);
+    const aw = measure(ctx, a, size, 900);
+    const bw = measure(ctx, b, size, 900);
+    const x0 = w / 2 - (aw + bw) / 2;
 
-      // Frame first, then the preview inset into it.
-      // Chosen cards get an accent *frame*, not an accent fill. Filling the card meant
-      // its own name had to sit on top of a saturated colour, which is the one place
-      // this palette cannot hold contrast.
-      if (chosen) {
-        const o = Math.round(3 * k);
-        notchedPanel(ctx, x - o, cy - o, cardW + o * 2, cardH + o * 2, k, def.accent);
-      }
-      notchedPanel(ctx, x, cy, cardW, cardH, k, hot || chosen ? PANEL_LIT : PANEL);
+    const o = Math.max(2, Math.round(3 * k));
+    text(ctx, a, x0 + o, y + o, size, "#000000", "left", "middle", 900);
+    text(ctx, b, x0 + aw + o, y + o, size, "#000000", "left", "middle", 900);
+    text(ctx, a, x0, y, size, CREAM, "left", "middle", 900);
+    text(ctx, b, x0 + aw, y, size, accent, "left", "middle", 900);
 
-      const pad = 4 * k;
-      const previewH = cardH * 0.56;
-      const thumb = arenaThumb(def);
-      ctx.save();
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(thumb, x + pad, cy + pad, cardW - pad * 2, previewH);
-      ctx.restore();
-      // Ink line under the preview, so the art and the label do not bleed together.
-      ctx.fillStyle = INK;
-      ctx.fillRect(x + pad, cy + pad + previewH, cardW - pad * 2, 2 * k);
-
-      fitText(ctx, def.name.toUpperCase(), x + cardW / 2, cy + previewH + 22 * k,
-        15 * k, cardW - 12 * k, chosen ? CREAM : "rgba(244,241,232,0.72)", 900);
-
-      // The accent bar is the card's identity, and it is solid for the chosen one and
-      // a stub for the rest — a difference you can see without reading anything.
-      ctx.fillStyle = def.accent;
-      const barW = chosen ? cardW - 20 * k : 18 * k;
-      ctx.fillRect(x + cardW / 2 - barW / 2, cy + cardH - 10 * k, barW, 3 * k);
-
-      this.regions.push({ x, y: cy, w: cardW, h: cardH, action: { kind: "select", level: def } });
-    });
-
-    const rows = Math.ceil(n / perRow);
-    return y + rows * cardH + (rows - 1) * gap;
+    // A rule either side of the subtitle, which reads as chrome rather than as text.
+    const sub = "PICK SOMETHING TO BREAK";
+    const sy = y + size * 0.68;
+    const subW = measure(ctx, sub, 12 * k, 800);
+    text(ctx, sub, w / 2, sy, 12 * k, MUTED, "center", "middle", 800);
+    ctx.fillStyle = accent;
+    ctx.globalAlpha = 0.5;
+    ctx.fillRect(w / 2 - subW / 2 - 34 * k, sy - 1 * k, 24 * k, 2 * k);
+    ctx.fillRect(w / 2 + subW / 2 + 10 * k, sy - 1 * k, 24 * k, 2 * k);
+    ctx.globalAlpha = 1;
   }
 
-  /** Name, tagline, tags and the PLAY button for whichever arena is selected. */
-  private drawDetail(ctx: Ctx, w: number, h: number, k: number, top: number) {
-    const def = this.previewLevel;
-    let y = top + 34 * k;
+  /**
+   * The stickman, standing on the lower band with the chicken cannon.
+   *
+   * Drawn rather than sprited, in the same pure-black vector the game draws him in.
+   * `GAME_SPEC` calls that contrast the game's identity - the one thing you control is
+   * the one thing drawn in a different language - and a menu that rendered him any
+   * other way would be advertising a different game. The gun is the real sprite out of
+   * `render/gunart.ts`, the one he will be holding sixty seconds from now.
+   *
+   * He idles: a slow bob, and the barrel drifts. A still figure on a screen where the
+   * world behind him is moving reads as a decal stuck on the glass.
+   */
+  private drawMascot(ctx: Ctx, w: number, groundY: number, k: number) {
+    const s = 74 * k;
+    const x = w - Math.max(120 * k, w * 0.135);
+    const y = groundY + Math.sin(this.t * 1.7) * 1.6 * k;
 
-    text(ctx, def.name.toUpperCase(), w / 2, y, 26 * k, CREAM, "center", "middle", 900);
-    y += 24 * k;
+    ctx.save();
+    ctx.translate(x, y);
+
+    const lw = Math.max(2, s * 0.11);
+    ctx.strokeStyle = "#0a0c11";
+    ctx.fillStyle = "#0a0c11";
+    ctx.lineWidth = lw;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    const hipY = -s * 0.46;
+    const shoY = -s * 0.84;
+
+    // Legs braced apart and a straight spine: what somebody firing something far too
+    // heavy for them actually stands like.
+    ctx.beginPath();
+    ctx.moveTo(0, hipY); ctx.lineTo(-s * 0.22, 0);
+    ctx.moveTo(0, hipY); ctx.lineTo(s * 0.24, -s * 0.01);
+    ctx.moveTo(0, hipY); ctx.lineTo(0, shoY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0, shoY - s * 0.14, s * 0.145, 0, TAU);
+    ctx.fill();
+
+    // The gun, held level and drifting, as though tracking something off-screen that
+    // has not noticed him yet.
+    ctx.save();
+    ctx.translate(0, shoY + s * 0.08);
+    ctx.rotate(Math.sin(this.t * 0.8) * 0.08 - 0.04);
+    const gun = gunSprite("chicken", "#39404e");
+    if (gun) {
+      const gw = s * 1.2;
+      const gh = (gun.height / gun.width) * gw;
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(gun, -gw * 0.2, -gh / 2, gw, gh);
+      // Arms last, so the hands read as being on the gun rather than behind it.
+      ctx.strokeStyle = "#0a0c11";
+      ctx.lineWidth = lw;
+      ctx.beginPath();
+      ctx.moveTo(0, 0); ctx.lineTo(gw * 0.46, gh * 0.04);
+      ctx.moveTo(0, 0); ctx.lineTo(gw * 0.14, gh * 0.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+    ctx.restore();
+
+    // And the payload, waiting its turn by his boot. This is the joke the entire game
+    // is built on and there was not one anywhere on the front end.
+    const chick = ammoSprite("chicken", this.t);
+    if (chick) {
+      const cw = s * 0.46;
+      const ch = (chick.height / chick.width) * cw;
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(chick, x - s * 1.15, groundY - ch, cw, ch);
+      ctx.restore();
+    }
+  }
+
+  /**
+   * The lower band: the arena strip, the blurb for whatever is selected, and PLAY.
+   *
+   * The cards are name plates rather than paintings. See the note at the top of the
+   * file - the arena is playing directly behind this band at full size, and a 168-pixel
+   * painting was never going to preview it better than that.
+   */
+  /**
+   * How tall the lower band has to be, and the card grid that decides it.
+   *
+   * Split out from the drawing so `draw` can size the band before anything is painted
+   * into it. The alternative - guessing a fraction of the viewport and hoping - is what
+   * left seventy pixels of empty ink under the progress bar at 1600x900 and clipped the
+   * keyboard hint on a short window.
+   */
+  private pickerLayout(w: number, h: number, k: number) {
+    const n = ARENAS.length;
+    const pad = Math.max(16 * k, w * 0.02);
+    const gap = 8 * k;
+    const avail = w - pad * 2;
+    const flat = (avail - gap * (n - 1)) / n;
+    // Below the width a name still fits in, the row splits 4 + 3 - the only balanced
+    // split of seven. A wrap that leaves one orphan card reads as a bug, not a grid.
+    //
+    // The threshold is the width the *longest* name needs, not an arbitrary minimum.
+    // At 92 the row stayed unsplit down to 64-pixel plates, and `fitText` dutifully
+    // shrank "PROVING GROUND" to about seven pixels tall rather than wrapping — a row
+    // of seven cards nobody could read, which is worse than two rows of readable ones.
+    const longest = ARENAS.reduce((m, d) => Math.max(m, d.name.length), 0);
+    const perRow = flat < (longest * 8 + 26) * k ? 4 : n;
+    const cardW = Math.min(190 * k, (avail - gap * (perRow - 1)) / perRow);
+    const cardH = Math.round(clamp(h * 0.062, 34 * k, 52 * k));
+    const rows = Math.ceil(n / perRow);
+    const playH = Math.round(clamp(h * 0.055, 34 * k, 48 * k));
+
+    // The running total below is the band, item by item, in the order it is drawn.
+    const height = Math.round(
+      18 * k                                   // pad under the accent rule
+      + rows * cardH + (rows - 1) * gap        // the strip
+      + 26 * k + 20 * k + 20 * k               // name, tagline, tag chips
+      + 24 * k + playH                         // PLAY
+      + 22 * k                                 // the keyboard hint
+      + 34 * k + 26 * k                        // the unlock bar's label and its track
+      + 20 * k,                                // pad above the screen edge
+    );
+    return { perRow, cardW, cardH, rows, gap, playH, height };
+  }
+
+  private drawPicker(
+    ctx: Ctx, w: number, y0: number,
+    L: ReturnType<Menu["pickerLayout"]>, k: number,
+  ) {
+    const def = this.previewLevel;
+    const n = ARENAS.length;
+    const { perRow, cardW, cardH, rows, gap } = L;
+    const stripY = y0 + Math.round(18 * k);
+
+    ARENAS.forEach((d, i) => {
+      const row = Math.floor(i / perRow);
+      const count = Math.min(perRow, n - row * perRow);
+      const ox = w / 2 - (count * cardW + (count - 1) * gap) / 2;
+      const x = ox + (i - row * perRow) * (cardW + gap);
+      const cy = stripY + row * (cardH + gap);
+      const chosen = i === this.sel;
+      const hot = this.isHot(x, cy, cardW, cardH);
+
+      notchedPanel(ctx, x, cy, cardW, cardH, k,
+        chosen ? d.accent : (hot ? PANEL_LIT : PANEL));
+      // The chosen plate is *filled* with its accent and the rest carry it as a spine
+      // down the left edge - a difference you can see without reading anything.
+      if (!chosen) {
+        ctx.fillStyle = d.accent;
+        ctx.fillRect(x + 3 * k, cy + 4 * k, 3 * k, cardH - 8 * k);
+      }
+      fitText(ctx, d.name.toUpperCase(), x + cardW / 2, cy + cardH / 2,
+        13 * k, cardW - 20 * k, chosen ? INK : CREAM, 900);
+
+      this.regions.push({ x, y: cy, w: cardW, h: cardH, action: { kind: "select", level: d } });
+    });
+
+    let y = stripY + rows * cardH + (rows - 1) * gap + Math.round(26 * k);
+    text(ctx, def.name.toUpperCase(), w / 2, y, 24 * k, CREAM, "center", "middle", 900);
+    y += 20 * k;
     text(ctx, def.tagline, w / 2, y, 13 * k, MUTED, "center", "middle", 700);
-    y += 24 * k;
+    y += 20 * k;
 
     // Tags as hard-edged chips in the arena's accent.
-    const chipH = 18 * k;
+    const chipH = 17 * k;
     const chipPad = 9 * k;
     const widths = def.tags.map((t) => measure(ctx, t, 10 * k, 800) + chipPad * 2);
     const chipGap = 6 * k;
     let cx = w / 2 - (widths.reduce((a, b) => a + b, 0) + chipGap * (def.tags.length - 1)) / 2;
     def.tags.forEach((tag, i) => {
-      ctx.fillStyle = INK;
+      ctx.fillStyle = PANEL;
       ctx.fillRect(cx, y - chipH / 2, widths[i], chipH);
       ctx.fillStyle = def.accent;
       ctx.fillRect(cx, y - chipH / 2, widths[i], 2 * k);
       text(ctx, tag, cx + widths[i] / 2, y + 1 * k, 10 * k, def.accent, "center", "middle", 800);
       cx += widths[i] + chipGap;
     });
-    y += 34 * k;
+    y += 24 * k;
 
-    // PLAY.
-    const bw = Math.min(260 * k, w - 80 * k);
-    const bh = 46 * k;
+    const bw = Math.min(280 * k, w - 80 * k);
+    const bh = L.playH;
     const bx = w / 2 - bw / 2;
     const hot = this.isHot(bx, y, bw, bh);
     notchedPanel(ctx, bx, y, bw, bh, k, hot ? "#ffdf6a" : GOLD, INK);
     text(ctx, "PLAY", w / 2, y + bh / 2, 22 * k, INK, "center", "middle", 900);
     this.regions.push({ x: bx, y, w: bw, h: bh, action: { kind: "play", level: def } });
-    y += bh + 12 * k;
 
-    text(ctx, "← →  CHOOSE      ENTER  PLAY", w / 2, y + 6 * k, 10 * k, MUTED, "center", "middle", 800);
+    text(ctx, "\u2190 \u2192  CHOOSE      ENTER  PLAY", w / 2, (y += bh) + 12 * k,
+      10 * k, MUTED, "center", "middle", 800);
 
-    this.drawUnlockBar(ctx, w, h, k);
+    this.drawUnlockBar(ctx, w, y + 42 * k, k);
   }
 
   /**
@@ -300,11 +458,10 @@ export class Menu {
    * round, a bar measured from zero barely twitches over a session and reads as "this is
    * hopeless" rather than "nearly there". See `progress.nextUnlock`.
    */
-  private drawUnlockBar(ctx: Ctx, w: number, h: number, k: number) {
+  private drawUnlockBar(ctx: Ctx, w: number, by: number, k: number) {
     const next = progress.nextUnlock();
     const bw = Math.min(420 * k, w - 60 * k);
     const bx = w / 2 - bw / 2;
-    const by = h - 54 * k;
 
     if (!next) {
       text(ctx, `${progress.carnage.toLocaleString("en-US")} CARNAGE · EVERY ROUND UNLOCKED`,
@@ -335,14 +492,15 @@ export class Menu {
   }
 
   /** Carnage total, top right, next to the cog. */
-  private drawGearButton(ctx: Ctx, w: number, k: number) {
+  private drawGearButton(ctx: Ctx, w: number, bandH: number, k: number) {
+    const mid = bandH * 0.44;
     const total = `${progress.carnage.toLocaleString("en-US")}`;
-    text(ctx, total, w - 62 * k, 30 * k, 15 * k, GOLD, "right", "middle", 900);
-    text(ctx, "CARNAGE", w - 62 * k, 44 * k, 9 * k, MUTED, "right", "middle", 800);
+    text(ctx, total, w - 62 * k, mid - 7 * k, 15 * k, GOLD, "right", "middle", 900);
+    text(ctx, "CARNAGE", w - 62 * k, mid + 7 * k, 9 * k, MUTED, "right", "middle", 800);
 
     const r = 17 * k;
     const cx = w - 32 * k;
-    const cy = 34 * k;
+    const cy = mid;
     const hot = this.isHot(cx - r, cy - r, r * 2, r * 2);
     drawGear(ctx, cx, cy, r * 0.62, hot);
     this.regions.push({ x: cx - r, y: cy - r, w: r * 2, h: r * 2, action: { kind: "ui", ui: "options" } });
@@ -483,157 +641,6 @@ export class Menu {
     const m = this.lastMouse;
     return m.x >= x && m.x <= x + w && m.y >= y && m.y <= y + h;
   }
-}
-
-// ------------------------------------------------------------------ previews
-
-const THUMB_W = 240;
-const THUMB_H = 132;
-const thumbs = new Map<string, HTMLCanvasElement>();
-
-/**
- * A painted preview of an arena, built from that arena's own theme and its `shape`.
- *
- * Flat bands — sky, two ridges — then the arena's silhouette drawn out of ground slabs
- * and accent-coloured structures, and a black stickman for scale. No gradients, so it
- * matches the rest of the frame; and because the colours come from the same theme the
- * level loads, an arena that is repainted repaints its own card.
- *
- * Cached forever: seven small canvases, built once on the first frame of the menu.
- */
-function arenaThumb(def: LevelDef): HTMLCanvasElement {
-  const hit = thumbs.get(def.id);
-  if (hit) return hit;
-
-  const c = document.createElement("canvas");
-  c.width = THUMB_W;
-  c.height = THUMB_H;
-  const g = c.getContext("2d")!;
-  const th = THEMES[def.theme] ?? THEMES.day;
-
-  // Sky. A painted backdrop names its own flat colour; otherwise take the middle stop
-  // of the gradient, which is the one the horizon actually sits against.
-  g.fillStyle = th.sprites?.sky ?? th.sky[1];
-  g.fillRect(0, 0, THUMB_W, THUMB_H);
-  g.fillStyle = th.hillFar;
-  g.fillRect(0, THUMB_H * 0.42, THUMB_W, THUMB_H);
-  g.fillStyle = th.hillNear;
-  g.fillRect(0, THUMB_H * 0.56, THUMB_W, THUMB_H);
-
-  const base = Math.round(THUMB_H * 0.78);
-  const solid = th.groundTop;
-  const deep = th.ground;
-
-  /** A block of ground, with its lit top surface. Every shape is made of these. */
-  const slab = (x: number, y: number, w: number, h: number) => {
-    g.fillStyle = deep;
-    g.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-    g.fillStyle = solid;
-    g.fillRect(Math.round(x), Math.round(y), Math.round(w), 4);
-  };
-  /** A structure standing on the ground, in the arena's accent. */
-  const build_ = (x: number, y: number, w: number, h: number, tint = def.accent) => {
-    g.fillStyle = INK;
-    g.fillRect(Math.round(x) - 1, Math.round(y - h) - 1, Math.round(w) + 2, Math.round(h) + 2);
-    g.fillStyle = tint;
-    g.fillRect(Math.round(x), Math.round(y - h), Math.round(w), Math.round(h));
-    g.fillStyle = "rgba(255,255,255,0.16)";
-    g.fillRect(Math.round(x), Math.round(y - h), Math.round(w), 3);
-  };
-
-  // The silhouette. This is the whole point of the card: seven arenas that mostly share
-  // a tileset are told apart by the shape of their ground, not by their scenery.
-  switch (def.shape) {
-    case "tower":
-      slab(0, base, THUMB_W, THUMB_H - base);
-      build_(THUMB_W * 0.42, base, 34, 84);
-      build_(THUMB_W * 0.66, base, 24, 44);
-      build_(THUMB_W * 0.18, base, 18, 22);
-      break;
-
-    case "bowl": {
-      // Rims, then three terraces a side stepping down to a floor.
-      slab(0, base - 34, THUMB_W * 0.2, THUMB_H);
-      slab(THUMB_W * 0.8, base - 34, THUMB_W * 0.2, THUMB_H);
-      for (let i = 0; i < 3; i++) {
-        const y = base - 24 + i * 8;
-        const inset = THUMB_W * (0.2 + i * 0.045);
-        slab(inset, y, THUMB_W * 0.055, THUMB_H);
-        slab(THUMB_W - inset - THUMB_W * 0.055, y, THUMB_W * 0.055, THUMB_H);
-      }
-      slab(THUMB_W * 0.335, base, THUMB_W * 0.33, THUMB_H - base);
-      build_(THUMB_W * 0.46, base, 20, 18);
-      break;
-    }
-
-    case "islands": {
-      // A chain climbing to the right, over nothing.
-      const xs = [0.04, 0.26, 0.47, 0.68, 0.88];
-      xs.forEach((fx, i) => {
-        const w = THUMB_W * 0.16;
-        const y = base - i * 9;
-        slab(THUMB_W * fx, y, w, 11);
-        if (i % 2 === 1) build_(THUMB_W * fx + w * 0.3, y, 12, 20);
-      });
-      break;
-    }
-
-    case "city": {
-      slab(0, base, THUMB_W, THUMB_H - base);
-      const hs = [46, 70, 54, 88, 62, 40];
-      hs.forEach((hh, i) => {
-        const w = 26;
-        const x = 12 + i * (w + 8);
-        build_(x, base, w, hh);
-        // Lit windows, which is the one thing that says "city" instantly.
-        g.fillStyle = "rgba(255,214,140,0.85)";
-        for (let r = 0; r < Math.floor(hh / 14); r++) {
-          g.fillRect(x + 5, base - hh + 8 + r * 14, 5, 5);
-          g.fillRect(x + 15, base - hh + 8 + r * 14, 5, 5);
-        }
-      });
-      break;
-    }
-
-    case "layered": {
-      // Three plateaus rising to a keep, each with its wall.
-      slab(0, base, THUMB_W * 0.42, THUMB_H - base);
-      slab(THUMB_W * 0.38, base - 18, THUMB_W * 0.3, THUMB_H);
-      slab(THUMB_W * 0.64, base - 36, THUMB_W * 0.36, THUMB_H);
-      build_(THUMB_W * 0.2, base, 16, 30);
-      build_(THUMB_W * 0.46, base - 18, 18, 38);
-      build_(THUMB_W * 0.74, base - 36, 30, 52);
-      break;
-    }
-
-    default: {
-      // Flat: a long ground line with a spread of structures along it, which is exactly
-      // what those arenas are.
-      slab(0, base, THUMB_W, THUMB_H - base);
-      build_(THUMB_W * 0.1, base, 20, 26);
-      build_(THUMB_W * 0.34, base, 28, 40);
-      build_(THUMB_W * 0.56, base, 16, 20);
-      build_(THUMB_W * 0.76, base, 32, 52);
-      break;
-    }
-  }
-
-  // The cast, for scale. Two pixels wide and unmistakable.
-  g.fillStyle = "#0a0c11";
-  const sx = Math.round(THUMB_W * 0.06);
-  const sy = def.shape === "bowl" ? base - 34 : base;
-  g.fillRect(sx - 2, sy - 14, 5, 5);
-  g.fillRect(sx - 1, sy - 9, 3, 6);
-  g.fillRect(sx - 3, sy - 3, 3, 4);
-  g.fillRect(sx + 1, sy - 3, 3, 4);
-
-  // Vignette by value, in flat bands — no gradient.
-  g.fillStyle = "rgba(10,12,18,0.18)";
-  g.fillRect(0, 0, THUMB_W, 5);
-  g.fillRect(0, THUMB_H - 5, THUMB_W, 5);
-
-  thumbs.set(def.id, c);
-  return c;
 }
 
 // ------------------------------------------------------------------ helpers

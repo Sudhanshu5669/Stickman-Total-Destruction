@@ -1,0 +1,78 @@
+<!doctype html><meta charset=utf-8><title>Arena shot harness</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+ *{margin:0;padding:0;box-sizing:border-box}
+ html,body{width:100%;height:100%;overflow:hidden;background:#0d0f14;
+   font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif}
+ #game{display:block;width:100%;height:100%;cursor:none}
+ #boot{display:none}
+</style>
+<canvas id="game"></canvas>
+<div id="boot"><div id="boot-err"></div></div>
+<script type="module">
+/*
+  Dev-only. Boots the real game and drops straight into one arena so a headless
+  browser can photograph it. Never shipped: not linked from index.html and not part
+  of the build's entry graph.
+
+    ?arena=<id>   the level to load, or `menu` to stay on the front end
+    ?t=<seconds>  how long to let the sim settle before the shot is taken
+    ?x=<metres>   pin the camera to this world X, for photographing a specific
+                  set-piece rather than wherever the fight has wandered to
+    ?sel=<n>      on the menu, select the nth arena before shooting
+
+  The player is made invulnerable on entry. Without it a fourteen-second unattended
+  settle ends with the garrison having shot him, and every screenshot is of a corpse
+  somewhere downrange of the thing you meant to look at.
+*/
+window.onerror = (m) => { document.title = "ERR " + m; };
+const { levelById } = await import("/src/levels/index.ts");
+await import("/src/main.ts");
+
+const q = new URLSearchParams(location.search);
+const id = q.get("arena") || "proving";
+const settle = Number(q.get("t") || "1.2");
+const camX = q.get("x") === null ? null : Number(q.get("x"));
+const sel = q.get("sel") === null ? null : Number(q.get("sel"));
+
+const ready = setInterval(() => {
+  const g = window.game;
+  // `id="game"` on the canvas makes `window.game` an element until main.ts
+  // overwrites it, so the method is the honest readiness test, not the name.
+  if (!g || typeof g.startLevel !== "function") return;
+  clearInterval(ready);
+
+  if (sel !== null) {
+    for (let i = 0; i < sel; i++) g.menu.moveSelection(1);
+    g.enterMenu();
+  }
+
+  if (id !== "menu") {
+    g.startLevel(levelById(id));
+    g.player.ragdoll.invulnerable = true;
+
+    /*
+      Settle the camera by hand, every timer tick.
+
+      Headless Chrome fast-forwards *timers* under --virtual-time-budget but keeps
+      producing frames at its own rate, so a fourteen-second budget delivers about
+      three requestAnimationFrames. The game loop is rAF-driven, which means the
+      camera damps toward its target roughly three times and the screenshot is of a
+      frame that never converged — it was still parked wherever `loadLevel` snapped
+      it, showing the composition of the *previous* level. Every framing judgement
+      made from these shots before this was measuring the harness.
+
+      `follow` then `update(dt, true)` snaps the camera to exactly where it would
+      have come to rest, which is the frame a player actually sees.
+    */
+    const settleCam = () => {
+      g.camera.follow(g.player.pos, 0, 0, 1 / 60);
+      if (camX !== null) g.camera.target.x = camX;
+      g.camera.update(1 / 60, true);
+      if (camX !== null) g.camera.pos.x = camX;
+    };
+    setInterval(settleCam, 8);
+  }
+  setTimeout(() => { document.title = "SHOT READY"; }, settle * 1000);
+}, 60);
+</script>

@@ -68,6 +68,57 @@ function build(game: GameCtx, b: Builder): LevelInfo {
       storeys, x, baseY: G0, material: "concrete",
     });
 
+  // ---------------------------------------------------------------- street furniture
+  /**
+   * The pavement, furnished.
+   *
+   * Grid City was the best-looking arena in the set and still had an empty street: a
+   * row of towers standing on a bare grey plane with nothing between them. The pack
+   * ships exactly what a street needs — lamps, lights, bins, signs — and none of it had
+   * ever been placed.
+   *
+   * Streetlamps are three tiles stacked, because the sheet draws them that way: the
+   * head at (6,1) and two lengths of pole under it. Traffic lights are the same trick
+   * one column over. Both are props rather than blocks — a lamp post that survives a
+   * piano landing on it is less annoying than one that becomes debris in every fight.
+   */
+  const lamp = (x: number) => {
+    b.prop({ sheet: deco, tx: 6, ty: 1, tw: 1, th: 1, x, y: G0 + 3.6, z: 6 });
+    b.prop({ sheet: deco, tx: 6, ty: 2, tw: 1, th: 1, x, y: G0 + 2.6, z: 6 });
+    b.prop({ sheet: deco, tx: 6, ty: 3, tw: 1, th: 1, x, y: G0 + 1.6, z: 6 });
+  };
+  const signal = (x: number, ty: number) => {
+    b.prop({ sheet: deco, tx: 7, ty, tw: 1, th: 1, x, y: G0 + 3.4, z: 6 });
+    b.prop({ sheet: deco, tx: 7, ty: 2, tw: 1, th: 1, x, y: G0 + 2.4, z: 6 });
+    b.prop({ sheet: deco, tx: 7, ty: 3, tw: 1, th: 1, x, y: G0 + 1.4, z: 6 });
+  };
+  /** Litter and bins, which is what actually makes a street look used. */
+  const kerb = (x: number, n: number) => {
+    const cells: [number, number][] = [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]];
+    for (let i = 0; i < n; i++) {
+      const c = cells[(Math.abs(Math.round(x)) + i * 3) % cells.length];
+      b.prop({ sheet: deco, tx: c[0], ty: c[1], tw: 1, th: 1, x: x + i * 1.5, y: G0, z: 7 });
+    }
+  };
+  const sign = (x: number, tx: number, ty: number) => {
+    b.prop({ sheet: deco, tx, ty, tw: 1, th: 1, x, y: G0 + 2.2, z: 6 });
+    b.prop({ sheet: deco, tx: 8, ty: 3, tw: 1, th: 1, x, y: G0 + 1.2, z: 6 });
+  };
+
+  for (let x = -56; x < 104; x += 13) lamp(x);
+  signal(-24, 0);
+  signal(28, 1);
+  signal(80, 0);
+  sign(-40, 2, 1);
+  sign(-6, 0, 2);
+  sign(44, 2, 3);
+  sign(92, 3, 1);
+  kerb(-46, 3);
+  kerb(-14, 4);
+  kerb(20, 3);
+  kerb(52, 4);
+  kerb(88, 3);
+
   // ---------------------------------------------------------------- the approach
   // Two low blocks first, so the street's scale is established by something the player
   // can see the top of before the tall ones arrive.

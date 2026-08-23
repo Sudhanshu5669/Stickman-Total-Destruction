@@ -18,7 +18,68 @@ Status: `pending` · `building` · `testing` · `done`
 | 9 | **Progression trim** — unlocks only; medals, streak, bonus, rank removed | **done** | PASS 2026-08-22 — progress.ts 600→230 lines. Medals, streak, daily, campaign clears, contract, ranks, ad ledger, best-run/chain/shot all deleted; `core/rng.ts` and `equipJetpack` orphaned and removed. **Ladder retuned against measured earn rates** (bot: ~1,100 carnage/sec with targets in reach) — old ladder unlocked the whole arsenal in ~20 min with the first round at ~2 s. New: bowling at ~60-70 s (verified), tv 45% at 90 s, blackhole ~5 h |
 | 10 | **Front end** — real game menu, no gradients, pixel framing, arena previews | **done** | PASS 2026-08-23 — `menu.ts` 1845→724 lines, one screen. No gradient, rounded corner or shadow anywhere: notched panels, flat fills, ink outlines. Cards painted from each level's `shape` + theme (`thumbArt` tileset slices gave five near-identical houses and are deleted); selecting an arena rebuilds the attract world behind it, so the card really is the preview. Verified in browser at 1536×702: all 7 cards select, PLAY, pause (RESUME/RESTART/OPTIONS/LEAVE all map to distinct 36 px regions), options steppers + tips toggle, LEAVE→menu. **Zero console errors.** Portrait 390×844 renders 4+3 (≈87 px cards) via the split rule. Fixed en route: attract-mode popups bled through the 72% scrim onto the menu type (`particles.mute`); the options panel was not modal, so CONTROL TIPS sat on PLAY and started the game |
 | 11 | **Feel pass** — HUD clarity, comedy callouts, satisfaction on every kill | **done** | PASS 2026-08-23. **Callouts** (`fx/callout.ts`): deaths named from what the physics did — SQUASHED / GRAVITY WINS / BOWLED OVER / COLLATERAL / OBLITERATED / TAKEN APART / DISMEMBERED, off `ragdoll.lastHitKind`, plus DOUBLE→QUAD KILL and MASSACRE. Kills batch in a 0.22 s window so one rocket into a stairwell prints one line, not five overlapping. Verified live in Long Meadow and Coldspine: a 2-enemy blast gave exactly one DOUBLE KILL beside the individual +points, a 3-enemy blast one TRIPLE KILL. Table + window boundary also checked directly (13/13 branches; 2 inside → DOUBLE, 2 outside → two singles, trickle does not extend the window). **HUD** moved into the menu's language: `ui/chrome.ts` holds the single notchedPanel/palette both screens import; the last `roundRect`, `shadowBlur` and panel gradient in the game are gone, health/fuel are cell meters. Verified by render over a deliberately pale background at 1100×560 — caught and fixed the HP number being chopped by the new cell gaps. **Known follow-ups:** a callout on a kill at your feet is born under the ammo plate and only clears as it drifts up (clamp the popup's screen Y); the 0.22 s window is correct but has not been judged for *feel* at full speed; kills are not attributed to the round that caused them (deliberate — see `ragdoll.lastHitKind` doc) |
-| 12 | **Perf pass** — frame budget on the slow-PC floor | pending | Holds 60 on High mid-range, holds 60 on Low with the budget throttled |
+| 12 | **Character pass** — the front end, and arenas that look like places | **done** | PASS 2026-08-23 — see below |
+| 13 | **Perf pass** — frame budget on the slow-PC floor | pending | Holds 60 on High mid-range, holds 60 on Low with the budget throttled |
+
+## System 12 — the character pass
+
+The complaint was "the front end looks bad, the levels are not attractive or big, give
+the game more character". All three were true and they had the same root: the *systems*
+were built and the *content density* was not.
+
+**The world.**
+
+- **Seasons.** `Floor Tiles1/2.png` draw one autotile three times over — green at row 0,
+  autumn at 6, snow at 12 — and every arena took the default. Ironhold laid summer turf
+  under an autumn sky; Coldspine ran a bright green stripe across a snowfield. The row is
+  now on the *theme* (`Theme.groundRow`), so an arena declares its world once.
+- **Skinning.** `shelf`, `basin` and `islands` built raw untextured terrain, so the
+  Quarry's terraces and the whole Drift island chain were flat grey-brown boxes in
+  arenas made otherwise of painted artwork. They all take the theme's ground skin now.
+- **Density.** `levels/dressing.ts` + `Builder.dress` — a seeded bulk scatter of the
+  pack's `Decor.png`, which was in the repo and almost unused. Long Meadow ran 216 m on
+  about 25 hand-placed props; a screen and a half held a tent, a tree and forty metres
+  of nothing. Every arena is now dressed by band, seeded on world X so scenery never
+  shuffles between loads. **Zero new rigid bodies** — measured against the System 8
+  baselines, every arena's body count is unchanged to within five.
+- **Sky.** `Builder.sky`. The painted backdrops switch the procedural sky off and nothing
+  replaced it, so five arenas ran a third of the frame as one flat colour while
+  `cloud1-6`, `birds1-4` and `sun.png` sat unreferenced.
+- **Under the ground.** A flat near-black slab was a third of every frame. `drawStrata`
+  steps it darker with depth with beds and buried stones; the backdrop's own subsurface
+  got the same treatment, which matters most in the Quarry where it *is* the pit wall.
+  The Drift opts out entirely (`voidBelow`) — it is a chain over a drop, and painting
+  soil a metre under the islands took the drop away.
+- **Structures.** `scaffold` gained cladding; Ironhold's twelve-storey centrepiece and
+  Coldspine's watchtowers were bare grey lattices. `BlockSkin.tile` repeats a cell
+  instead of stretching it, so a six-metre slab is clad at the artwork's own scale.
+- **Framing.** `FRAME_UP_MAX` was binding at every desktop zoom, so the horizon sat
+  across the middle of the screen and the dead ground took the space the sky and the
+  buildings wanted. `LevelDef.frameUp` lets the Quarry frame level — it is a hole, and
+  the default bias put the hole off the bottom of the screen.
+
+**Two real bugs found on the way.** `Input` initialised the aim point to
+`clientWidth / 2` in the constructor, when the canvas is usually still 0x0 — so the
+opening frames of every session aimed at the top-left corner and the camera led hard
+after it. And the shot harness starved `requestAnimationFrame` under
+`--virtual-time-budget`, so every framing judgement made from a screenshot before that
+was fixed was measuring the harness, not the game.
+
+**The front end.** Rebuilt as two solid bands and a window. The old screen laid a 72%
+scrim over the whole viewport and floated painted thumbnails on it — which wasted the
+attract world (a real fight, in the real arena, muted to a grey wash) and had those
+thumbnails competing with the thing they were previews of. The arena now plays almost
+unscrimmed between the bands, the cards are name plates, the whole screen repaints in
+the selected arena's accent, and `drawMascot` puts the stickman and a chicken on the
+game's own title screen holding a real sprite out of `render/gunart.ts`. The procedural
+ridge bands are drawn as a pixel staircase so the one arena still on that path stopped
+reading as a different game.
+
+**Verified** headlessly (the browser extension was offline again): all seven arenas load
+with zero console errors, the menu holds at 1600x900, 1280x620 and a 504-wide window
+where the picker splits 4 + 3, the pause screen is intact, `tsc` and `vite build` are
+clean, and `shot.html` stays out of the bundle. **Not yet judged at full speed by a
+human.**
 
 ## Notes
 

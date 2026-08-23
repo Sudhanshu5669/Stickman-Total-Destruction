@@ -117,6 +117,15 @@ export interface BlockSkin {
   sy: number;
   sw: number;
   sh: number;
+  /**
+   * Repeat the source cell across the block instead of stretching it to fit.
+   *
+   * One tile to one block is right for a wall built cell by cell, and wrong for a
+   * six-metre floor slab or a twelve-metre beam: the cell stretches over the whole
+   * length and the pixel art smears into a gradient. Tiled skins keep the artwork at
+   * its drawn scale whatever the block's proportions are.
+   */
+  tile?: boolean;
 }
 
 export interface BlockOptions {
@@ -212,6 +221,36 @@ export class Block implements Actor, PhysOwner {
       .setCollisionGroups(FILTER.BLOCK);
     this.collider = game.physics.world.createCollider(cd, this.body);
     game.physics.register(this.collider, this);
+  }
+
+  /**
+   * Paints a skin by repeating its cell, clipped to the block.
+   *
+   * Whole cells first, then a short row and column for whatever is left over, so a
+   * 3.4 m beam gets three full tiles and a 0.4 m sliver rather than three tiles and a
+   * stretched one. Clipping is by source rectangle rather than by a canvas clip path:
+   * a clip would cost a save/restore and a path per block, and there can be hundreds.
+   */
+  private blitTiled(ctx: Ctx, skin: BlockSkin, bleed: number) {
+    // The cell's size in metres, at the world scale the rest of the art is drawn to.
+    const cw = skin.sw / PPM;
+    const ch = skin.sh / PPM;
+    const x0 = -this.w / 2 - bleed;
+    const y0 = this.h / 2 + bleed;
+    const fullW = this.w + bleed * 2;
+    const fullH = this.h + bleed * 2;
+
+    for (let oy = 0; oy < fullH; oy += ch) {
+      const dh = Math.min(ch, fullH - oy);
+      for (let ox = 0; ox < fullW; ox += cw) {
+        const dw = Math.min(cw, fullW - ox);
+        blit(
+          ctx, skin.sheet,
+          skin.sx, skin.sy, skin.sw * (dw / cw), skin.sh * (dh / ch),
+          x0 + ox, y0 - oy, dw, dh,
+        );
+      }
+    }
   }
 
   /** Converts an anchored block into a free-falling one. Idempotent and cheap. */
@@ -401,11 +440,15 @@ export class Block implements Actor, PhysOwner {
         // few millimetres apart under the solver, and at high zoom that gap shows as a
         // seam of background straight through a solid wall.
         const bleed = 0.5 / PPM;
-        blit(
-          ctx, skin.sheet, skin.sx, skin.sy, skin.sw, skin.sh,
-          -this.w / 2 - bleed, this.h / 2 + bleed,
-          this.w + bleed * 2, this.h + bleed * 2,
-        );
+        if (skin.tile) {
+          this.blitTiled(ctx, skin, bleed);
+        } else {
+          blit(
+            ctx, skin.sheet, skin.sx, skin.sy, skin.sw, skin.sh,
+            -this.w / 2 - bleed, this.h / 2 + bleed,
+            this.w + bleed * 2, this.h + bleed * 2,
+          );
+        }
       } else {
         roundBox(ctx, this.w, this.h, Math.min(0.06, this.w * 0.2), base, shade(m.color, -0.4), 0.045);
       }
@@ -744,6 +787,68 @@ export class Terrain implements Actor, PhysOwner {
       for (let d = 0; d < bodyH; d++) {
         const rowH = Math.min(1, bodyH - d);
         blit(ctx, sk.sheet, mid, fill, PPM, PPM * rowH, gx, top - 1 - d, 1, rowH);
+      }
+    }
+
+    this.drawStrata(ctx, from, to, top, bodyH);
+  }
+
+  /**
+   * Bedding planes, depth shading and buried rubble, over the tiled subsoil.
+   *
+   * The pack's fill tile is one near-black brown, so any amount of it is the same
+   * colour: repeated six metres down and four hundred across it gave a slab with no
+   * information in it at all, which is what every arena's lower third actually was.
+   * The tiles cannot fix that themselves — there is only one of them.
+   *
+   * So depth is drawn rather than tiled, and the important half of that is **the
+   * darkening**, not the detail. Ground that holds one value all the way down competes
+   * with the playfield for attention no matter how much texture is scattered on it;
+   * ground that steps darker with depth reads as *under* the level and stops asking to
+   * be looked at. The strata and stones are what make those steps read as rock instead
+   * of as a vignette.
+   *
+   * Everything is seeded off world X, so the same metre of ground looks the same every
+   * frame and from every camera position — the property that lets this be regenerated
+   * per frame instead of baked.
+   */
+  private drawStrata(ctx: Ctx, from: number, to: number, top: number, bodyH: number) {
+    if (bodyH < 1.5) return;
+    const w = to - from;
+
+    // Depth shading, in four flat steps rather than a gradient — the same reason the
+    // rest of the game's chrome is flat. Each step doubles down until the bottom of the
+    // slab is nearly black and the surface metre is left untouched.
+    const steps = 4;
+    for (let i = 1; i <= steps; i++) {
+      const y0 = top - 1 - ((bodyH - 1) * i) / steps;
+      const h = (bodyH - 1) / steps;
+      ctx.fillStyle = rgba("#000000", 0.1 + i * 0.11);
+      ctx.fillRect(from, y0, w, h + 0.02);
+    }
+
+    // Bedding planes, at the joins between those steps, so the steps read as geology
+    // rather than as banding. Broken per metre so a bed undulates instead of ruling a
+    // straight line the width of the level.
+    for (let i = 1; i < steps; i++) {
+      const depth = 1 + ((bodyH - 1) * i) / steps;
+      ctx.fillStyle = rgba("#ffffff", 0.05);
+      for (let gx = Math.floor(from); gx < to; gx++) {
+        const wob = (hash01(gx * 1.7 + i * 31) - 0.5) * 0.45;
+        ctx.fillRect(gx, top - depth + wob, 1.02, 0.14);
+      }
+    }
+
+    // Buried stones. Two candidate positions per metre, most of them rejected. Fading
+    // with depth along with everything else, so they do not glow out of the dark.
+    for (let gx = Math.floor(from); gx < to; gx++) {
+      for (let n = 0; n < 2; n++) {
+        const h = hash01(gx * 5.3 + n * 97.1);
+        if (h < 0.6) continue;
+        const hy = hash01(gx * 2.9 + n * 13.7);
+        const sw = 0.2 + h * 0.34;
+        ctx.fillStyle = rgba("#ffffff", 0.09 * (1 - hy * 0.8));
+        ctx.fillRect(gx + hy * 0.7, top - 1.1 - hy * (bodyH - 1.4), sw, sw * 0.6);
       }
     }
   }

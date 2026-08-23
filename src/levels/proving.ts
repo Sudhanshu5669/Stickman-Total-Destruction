@@ -2,6 +2,7 @@ import { v } from "../core/math";
 import type { GameCtx } from "../core/types";
 import type { Builder } from "./builder";
 import type { LevelDef, LevelInfo } from "./types";
+import { LANDMARK, SKY_ASSETS } from "./dressing";
 
 /**
  * The Proving Ground — the QA harness, and a real arena.
@@ -47,7 +48,7 @@ const CAMPFIRE = `${PACK}/Animated Sprites/Campfire sheet.png`;
 /** Decoded before `build` runs — `spriteWall` reads the artwork's alpha. See `LevelDef.assets`. */
 export const PROVING_ASSETS: readonly string[] = [
   FLOOR, HOUSE, DECOR, OTHER, CAMPFIRE,
-  `${PACK}/Tree1.png`, `${PACK}/Birch1.png`, `${PACK}/Tall Grass.png`,
+  `${PACK}/Tree1.png`, `${PACK}/Birch1.png`, `${PACK}/Tall Grass.png`, ...SKY_ASSETS,
 ];
 
 /** Every material in the game, in one row, so a tuning change shows up as a difference. */
@@ -69,6 +70,24 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   // `skinnedGround` takes explicit edges, which is why this can be read at a glance and
   // the centre-based `ground()` it replaces could not. See the note on `Builder`.
   b.skinnedGround(-50, 125, G0, b.sheet(FLOOR));
+
+  // A bright noon sky with the pack's own clouds in it. This is the one arena on the
+  // procedural backdrop rather than a painted one, and the soft vector clouds it used
+  // to draw were the single most out-of-place thing in the game — the first arena a
+  // player opens, in a different art language from the other six. `day.cloudAlpha` is
+  // now zero for that reason; these replace them.
+  b.sky(-60, 250, G0 + 12, { heaviness: 0.35, sun: { x: 60, y: G0 + 21, scale: 6 } });
+
+  // The range is a range — mown, walked on, and kept clear on purpose — so it is
+  // dressed lightly and only between the test bands, never inside one. A stack of
+  // material samples has to sit against nothing in particular for the comparison to
+  // mean anything.
+  b.dress(-50, -34, G0, { density: 0.5, salt: 1 });
+  b.dress(-12, -6, G0, { density: 0.45, salt: 2 });
+  b.dress(48, 52, G0, { kind: "camp", density: 0.6, pitch: 1.6, salt: 3 });
+  b.dress(75, 128, G0, { density: 0.42, salt: 4 });
+  b.dress(160, 210, G0, { density: 0.4, salt: 5 });
+  b.landmark(LANDMARK.scarecrow, -47, G0, { z: 4 });
 
   // ------------------------------------------------------- band 0: crouch cover
   // The only geometry in the arena that tests ducking, and it needs its own clear lane.

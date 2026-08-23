@@ -41,11 +41,16 @@ export class Input {
   /** Latched go-limp tap from the on-screen button. */
   virtualLimpPressed = false;
 
+  /**
+   * Whether a real pointer event has ever arrived.
+   *
+   * Until one has, the aim point is *assumed* to be the centre of the screen rather
+   * than merely initialised there — see `centreMouse`.
+   */
+  private mouseSeen = false;
+
   constructor(private readonly canvas: HTMLCanvasElement) {
-    // Start at the centre of the viewport. Leaving it at (0,0) would make the very
-    // first frames aim at the top-left corner and yank the camera off the player.
-    this.mouse.x = canvas.clientWidth / 2;
-    this.mouse.y = canvas.clientHeight / 2;
+    this.centreMouse();
 
     addEventListener("keydown", this.onKeyDown, { passive: false });
     addEventListener("keyup", this.onKeyUp);
@@ -55,6 +60,22 @@ export class Input {
     addEventListener("pointerup", this.onPointerUp);
     canvas.addEventListener("wheel", this.onWheel, { passive: false });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+  }
+
+  /**
+   * Parks the aim point in the middle of the canvas, until the player moves the mouse.
+   *
+   * Leaving it at (0,0) aims at the top-left corner, and the camera leads hard toward
+   * the crosshair — so the opening frame of every session was composed as though the
+   * player were staring into the sky above their own left shoulder. Doing it once in
+   * the constructor was not enough: the canvas is frequently still 0x0 when `Game` is
+   * built, so `clientWidth / 2` was zero and the centre *was* the corner. The resize
+   * handler calls this until a real pointer event arrives and takes over.
+   */
+  centreMouse() {
+    if (this.mouseSeen) return;
+    this.mouse.x = this.canvas.clientWidth / 2;
+    this.mouse.y = this.canvas.clientHeight / 2;
   }
 
   private onKeyDown = (e: KeyboardEvent) => {
@@ -83,6 +104,7 @@ export class Input {
     const r = this.canvas.getBoundingClientRect();
     this.mouse.x = e.clientX - r.left;
     this.mouse.y = e.clientY - r.top;
+    this.mouseSeen = true;
   };
 
   private onPointerDown = (e: PointerEvent) => {

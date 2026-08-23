@@ -2,6 +2,7 @@ import { v } from "../core/math";
 import type { GameCtx } from "../core/types";
 import type { Builder } from "./builder";
 import type { LevelDef, LevelInfo } from "./types";
+import { LANDMARK, SKY_ASSETS } from "./dressing";
 
 /**
  * Ironhold — the vertical arena.
@@ -28,9 +29,10 @@ const PACK = "GandalfHardcore FREE Platformer Assets";
 const FLOOR = `${PACK}/Floor Tiles2.png`;
 const HOUSE = `${PACK}/House Tiles.png`;
 const DECOR = `${PACK}/Decor.png`;
+const OTHER = `${PACK}/Other Tiles1.png`;
 
 export const SPIRE_ASSETS: readonly string[] = [
-  FLOOR, HOUSE, DECOR,
+  FLOOR, HOUSE, DECOR, OTHER, ...SKY_ASSETS,
   `${PACK}/Large Pine Tree.png`, `${PACK}/Pine Trees.png`, `${PACK}/Tall Grass.png`,
   `${PACK}/GandalfHardcore Background layers/Autumn BG/Background Castle Autumn.png`,
   ...[1, 2, 3, 4, 5].map(
@@ -47,6 +49,16 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   const decor = b.sheet(DECOR);
   const house = b.sheet(HOUSE);
 
+  // An overcast autumn sky, low and heavy. The tower is the subject here, so the
+  // weather is drawn to sit behind it rather than to compete with it.
+  b.sky(-80, 80, G0 + 11, { heaviness: 0.7, sun: null });
+
+  // Scrub across the whole floor. Sparser than Long Meadow on purpose: this is a
+  // building site, and the ground between the towers is walked on.
+  b.dress(-70, 68, G0, { density: 0.5, salt: 1 });
+  b.dress(-30, -14, G0, { kind: "camp", density: 0.6, pitch: 1.8, salt: 2 });
+  b.dress(24, 44, G0, { kind: "camp", density: 0.5, pitch: 2.0, salt: 3 });
+
   // ---------------------------------------------------------------- approach
   // Deliberately empty for twenty metres. The player needs one clear look at the tower
   // from the bottom before anything asks for their attention — an arena whose whole
@@ -56,6 +68,8 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   b.prop({ sheet: b.sheet(`${PACK}/Pine Trees.png`), tx: 0, ty: 0, tw: 6, th: 5,
            x: -60, y: G0, scale: 1.1, z: -2, sway: 0.008 });
   b.prop({ sheet: b.sheet(`${PACK}/Tall Grass.png`), tx: 0, ty: 0, tw: 3, th: 1, x: -44, y: G0, z: 12 });
+  b.landmark(LANDMARK.scarecrow, -40, G0, { z: 4 });
+  b.landmark(LANDMARK.logStack, -30, G0, { scale: 1.3, z: 6 });
   b.crowd(-34, G0, ["grunt", "grunt"], 2, null);
   b.scatter(-26, G0, 6, 3);
 
@@ -65,6 +79,7 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   // gets to knock off anything.
   b.scaffold({
     x: 0, baseY: G0, floors: 12, width: 7, floorHeight: 3.2, material: "concrete",
+    clad: { sheet: house, tx: 2, ty: 3 },
     guards: ["grunt", "guard", "grunt", "guard", "boss"],
     guardEvery: 2,
     arms: { behavior: "sentry", gun: "rifle", range: 40 },
@@ -84,10 +99,15 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   // ---------------------------------------------------------------- the neighbour
   // Something for the tower to fall against. A collapse into open air is a shape
   // changing; a collapse into another building is two shapes changing.
-  b.spriteWall({ sheet: house, tx: 1, ty: 0, cols: 5, rows: 7, x: 20, baseY: G0, material: "brick" });
-  b.spriteWall({ sheet: house, tx: 8, ty: 0, cols: 5, rows: 7, x: 20, baseY: G0 + 7, material: "brick" });
+  // Plain wall band underneath, gabled top storey above it — the order the manor in
+  // Long Meadow uses. Stacking two *gabled* houses, which is what this was, leaves the
+  // upper one balanced on the lower one's roof peak with open air under both eaves: it
+  // reads as a bug from forty metres away and it was the first thing the eye found.
+  b.spriteWall({ sheet: house, tx: 1, ty: 2, cols: 5, rows: 5, x: 20, baseY: G0, material: "concrete" });
+  b.spriteWall({ sheet: house, tx: 1, ty: 0, cols: 5, rows: 7, x: 20, baseY: G0 + 5, material: "brick" });
   b.scaffold({
     x: 34, baseY: G0, floors: 6, width: 5.5, floorHeight: 3.2, material: "brick",
+    clad: { sheet: house, tx: 2, ty: 5 },
     guards: ["grunt"], guardEvery: 2,
     arms: { behavior: "sentry", gun: "sniper", range: 60 },
   });
@@ -96,6 +116,7 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   // A last low parapet on the far side, so the ground fight has somewhere to duck.
   b.block(56, G0 + 0.55, 3.4, 1.1, "concrete");
   b.wall(62, G0, 3, 4, "brick");
+  b.landmark(LANDMARK.statue, 66, G0, { scale: 1.5, z: 4 });
 
   return {
     spawn: v(-46, G0 + 1.2),

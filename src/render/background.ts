@@ -89,6 +89,20 @@ export class Background {
   private skylineFar: Strip | null = null;
   private decks: Strip[] = [];
   private subsurface: Strip | null = null;
+
+  /**
+   * Whether to paint earth below the ground line.
+   *
+   * True everywhere the world has a floor. The Drift does not: it is a chain of
+   * platforms over a drop, and "gravity is the weapon" is the entire pitch. Filling the
+   * space under those platforms with soil said the opposite — that there was ground
+   * down there, a metre below the islands, and nothing was really at stake. Turning it
+   * off leaves the backdrop's own sky under the chain, which is what a drop looks like.
+   *
+   * Set per level from `LevelDef.voidBelow`, not per theme: the Drift shares `grove`
+   * with two arenas that very much do have a floor.
+   */
+  subsurface_ = true;
   private fg: Strip | null = null;
 
   // --- per-viewport bakes ------------------------------------------------------
@@ -116,7 +130,7 @@ export class Background {
     // The subsurface still runs — it is what stops sky showing under a blown crater.
     if (th.sprites) {
       this.drawSpriteBackdrop(ctx, cam, w, h, horizon, z, th.sprites);
-      this.drawSubsurface(ctx, w, h, horizon, z, th);
+      this.drawSubsurface(ctx, cam, w, h, horizon, z, th);
       return;
     }
 
@@ -134,7 +148,7 @@ export class Background {
     this.blit(ctx, this.skylineFar, cam, w, horizon, z, D_SKYLINE_FAR, 0, 0);
     this.blit(ctx, this.skylineNear, cam, w, horizon, z, D_SKYLINE, 0, 0);
     this.drawHills(ctx, cam, w, h, horizon, z, th);
-    this.drawSubsurface(ctx, w, h, horizon, z, th);
+    this.drawSubsurface(ctx, cam, w, h, horizon, z, th);
   }
 
   /**
@@ -211,45 +225,75 @@ export class Background {
    * strokes they are already cheap in draw calls, and their wavelengths run to 160
    * metres, which would need a five-thousand-pixel strip to bake without repeating.
    */
+  /**
+   * The three generated ridge bands.
+   *
+   * Drawn as a **staircase**, not as a curve. Every other surface in this game is pixel
+   * art off a 32-pixel-per-metre tileset, and a smooth sine ridge behind a wall of
+   * pixel-art crates is the seam a player notices first without being able to name it:
+   * the Proving Ground is the one arena still on this procedural path, and it read as a
+   * different game from the other six purely because its horizon had anti-aliased
+   * curves in it.
+   *
+   * Quantising to a chunky pixel grid costs one `Math.round` per vertex and puts the
+   * generated backdrop into the same language as the painted ones. The step is derived
+   * from the world scale rather than from screen pixels, so the ridge does not change
+   * texture when the camera zooms — three art pixels at the tileset's own resolution,
+   * which is coarse enough to read as deliberate at any distance.
+   */
   private drawHills(ctx: Ctx, cam: Camera, w: number, h: number, horizon: number, z: number, th: Theme) {
     const colors = [th.hillFar, th.hillMid, th.hillNear];
+    // Three tileset pixels, in screen pixels, floored to at least one. Coarser than
+    // this and the far ridge — which is nearly flat, so its treads run for hundreds of
+    // pixels — stops reading as a hill and starts reading as a flight of stairs.
+    const px = Math.max(1, Math.round((z / 32) * 3));
+
     for (let i = 0; i < 3; i++) {
       const L = HILLS[i];
       const off = cam.pos.x * z * D_HILL[i];
       const f1 = TAU / L.wave;
       const f2 = TAU / L.wave2;
+      const at = (sx: number) => {
+        const wx = (sx + off) / z;
+        const y = horizon
+          - (L.lift + L.amp * (0.6 + 0.4 * Math.sin(wx * f1)) * (0.7 + 0.3 * Math.sin(wx * f2))) * z;
+        return Math.round(y / px) * px;
+      };
+
       ctx.fillStyle = colors[i];
       ctx.beginPath();
-      ctx.moveTo(-10, h + 10);
-      for (let sx = -10; sx <= w + 10; sx += 16) {
-        const wx = (sx + off) / z;
-        const y = horizon - (L.lift + L.amp * (0.6 + 0.4 * Math.sin(wx * f1)) * (0.7 + 0.3 * Math.sin(wx * f2))) * z;
-        ctx.lineTo(sx, y);
+      ctx.moveTo(-px, h + 10);
+      let prev = at(-px);
+      ctx.lineTo(-px, prev);
+      for (let sx = -px; sx <= w + px * 2; sx += px) {
+        const y = at(sx);
+        // Along, then up or down: the two moves that make a staircase rather than a
+        // ramp. Emitting them in this order keeps the vertical edge on the *far* side
+        // of each tread, which is what a hand-drawn pixel slope looks like.
+        if (y !== prev) {
+          ctx.lineTo(sx, prev);
+          ctx.lineTo(sx, y);
+          prev = y;
+        }
+        ctx.lineTo(sx + px, y);
       }
-      ctx.lineTo(w + 10, h + 10);
+      ctx.lineTo(w + px * 2, h + 10);
       ctx.closePath();
       ctx.fill();
+
       // Lit rim along the crest. Every closing edge of this path is off-screen, so
-      // stroking the whole thing only ever paints the ridge itself.
+      // stroking the whole thing only ever paints the ridge itself. One art pixel wide,
+      // so the highlight is a row of pixels rather than a hairline.
       ctx.strokeStyle = shade(colors[i], 0.26);
-      ctx.lineWidth = 1.6;
+      ctx.lineWidth = Math.max(1, px * 0.5);
       ctx.stroke();
     }
   }
 
-  /**
-   * Everything below the ground plane, painted before the world so terrain slabs sit
-   * on top of it.
-   *
-   * This is also the fix for the sky-strip seam. The terrain slabs are only six metres
-   * deep, so on a tall viewport or a wide zoom the frame ran out of ground and showed
-   * backdrop underneath. Filling from the horizon to the bottom of the viewport —
-   * starting at exactly `theme.ground` so the join is invisible — means there is no
-   * camera position or zoom at which anything can show through, and it doubles as the
-   * depth cue that makes a canyon read as a hole rather than a gap in the art.
-   */
-  private drawSubsurface(ctx: Ctx, w: number, h: number, horizon: number, z: number, th: Theme) {
-    if (horizon >= h || !this.subsurface) return;
+  private drawSubsurface(
+    ctx: Ctx, cam: Camera, w: number, h: number, horizon: number, z: number, th: Theme,
+  ) {
+    if (horizon >= h || !this.subsurface || !this.subsurface_) return;
     const s = this.subsurface;
     const bottom = horizon + s.h * (z / REF);
     // One stretched blit carries the gradient and every stratum. Past the bottom of the
@@ -261,6 +305,39 @@ export class Background {
       ctx.fillRect(0, from, w, h - from);
     }
     ctx.drawImage(s.c, 0, 0, s.w, s.h, 0, horizon, w, bottom - horizon);
+    this.drawBuriedStones(ctx, cam, w, h, horizon, z);
+  }
+
+  /**
+   * Stones in the earth behind the world, seeded off world position.
+   *
+   * Screen space, but seeded from the world coordinate under each column, so they hold
+   * still as the camera pans instead of crawling across it. Kept to a coarse grid —
+   * one candidate every two metres, most rejected — because this is backdrop: enough
+   * to say "rock", not enough to be looked at.
+   */
+  private drawBuriedStones(
+    ctx: Ctx, cam: Camera, w: number, h: number, horizon: number, z: number,
+  ) {
+    if (horizon >= h) return;
+    const step = 2;
+    const left = cam.pos.x - w / 2 / z;
+    const from = Math.floor(left / step) * step;
+    const to = left + w / z;
+    const depth = h - horizon;
+
+    for (let wx = from; wx < to; wx += step) {
+      for (let n = 0; n < 2; n++) {
+        const r = hash01(wx * 3.7 + n * 51.3);
+        if (r < 0.55) continue;
+        const d = hash01(wx * 1.9 + n * 23.1);
+        const y = horizon + 0.1 * depth + d * depth * 0.95;
+        if (y > h) continue;
+        const sw = (0.3 + r * 0.6) * z;
+        ctx.fillStyle = `rgba(255,255,255,${(0.07 * (1 - d * 0.75)).toFixed(3)})`;
+        ctx.fillRect((wx - left) * z, y, sw, sw * 0.55);
+      }
+    }
   }
 
   /**
@@ -724,6 +801,30 @@ export class Background {
     for (let y = Math.round(2.6 * REF); y < depth; y += Math.round(2.6 * REF)) {
       g.fillRect(0, y, s.w, Math.max(1, 0.22 * REF));
     }
+
+    /*
+      Rock, rather than a plane of brown.
+
+      This strip is only visible where no terrain slab covers it — behind a crater, off
+      the ends of a level, and above all *inside the Quarry*, where it is the entire
+      wall of the pit and therefore half the frame. Flat fill was survivable when it
+      only ever showed through a shell hole; it is not survivable as the backdrop of a
+      whole arena.
+
+      Bedding planes, matching what `Terrain.drawStrata` puts on the tiled slabs, so
+      the earth behind a hole is made of the same stuff as the earth around it. Baked
+      once per theme into a four-pixel-wide strip that is then stretched across the
+      viewport — which is why only the *beds* live here. Anything with a horizontal
+      extent, stones included, would stretch into a band; those are scattered in the
+      draw pass instead, where there is a real width to place them across.
+    */
+    const bed = Math.round(1.3 * REF);
+    for (let y = bed; y < depth; y += bed) {
+      const n = hash01(y * 0.31);
+      g.fillStyle = n > 0.5 ? "rgba(255,255,255,0.035)" : "rgba(0,0,0,0.1)";
+      g.fillRect(0, y, s.w, Math.max(1, 0.16 * REF));
+    }
+
     // Hard shadow directly under the ground plane: where no terrain slab covers it —
     // over a canyon, past the ends of a level — this is what keeps the ground line a
     // drawn edge instead of a colour change.

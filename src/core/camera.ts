@@ -62,9 +62,27 @@ const SPEED_WIDE = 26;
  * ground, but it also walks the character toward the bottom edge, and a player pinned to
  * the floor of their own screen has nowhere to fall to.
  */
-const FRAME_UP = 0.19;
-/** ...but capped in metres, or a tall portrait viewport parks the player near the floor. */
-const FRAME_UP_MAX = 3.4;
+const FRAME_UP = 0.21;
+/**
+ * How far *down* a world is allowed to push that, as a fraction subtracted from
+ * `FRAME_UP`. 1 puts the followed point back in the middle of the frame.
+ */
+export const FRAME_LEVEL = 1;
+/**
+ * A ceiling on that, in metres — but a generous one, and it is not the thing shaping
+ * the normal frame any more.
+ *
+ * At 3.4 m the cap bound at every desktop zoom the game actually plays at: the wider
+ * frame System 4 bought pushed `halfH` past 11 m, the fraction asked for 4.3 m and got
+ * 3.4, and the composition quietly reverted to "horizon across the middle of the
+ * screen". That is what put a third of every arena's frame under the ground — a flat
+ * slab of subsoil nobody can shoot, sitting where the sky and the buildings should be.
+ *
+ * 6 m only catches a full spectacle dolly-out, which is the case the cap was written
+ * for. Everywhere else the fraction governs, and the composition is finally the one the
+ * comment above describes.
+ */
+const FRAME_UP_MAX = 6;
 
 /** Vertical look-ahead: seconds of the followed point's own velocity to lead by. */
 const RISE_LEAD = 0.2;
@@ -163,6 +181,17 @@ export class Camera {
   /** Pixels per metre. */
   zoom = 34;
   targetZoom = 34;
+
+  /**
+   * Scales the upward framing bias, per world. 1 is the default composition.
+   *
+   * Sitting the camera above the action is right for six of the seven arenas, whose
+   * subject is a building standing on the ground. It is exactly wrong for the Quarry,
+   * whose subject is a hole: the framing pushed the horizon down, and the arena's
+   * entire contents — three terraces and a floor twelve metres below the rim — started
+   * off the bottom of the screen. A bowl wants to look *into* itself.
+   */
+  frameUp = 1;
   minZoom = 8;
   maxZoom = 260;
 
@@ -334,7 +363,7 @@ export class Camera {
 
     // Composition, in metres, against the zoom we are about to draw with.
     const halfH = this.viewH / 2 / Math.max(1e-3, this.zoom);
-    const up = Math.min(FRAME_UP * halfH * 2, FRAME_UP_MAX);
+    const up = Math.min(FRAME_UP * this.frameUp * halfH * 2, FRAME_UP_MAX * this.frameUp);
     // The whole vertical budget is clamped rather than each contributor, so aim lead,
     // look-ahead and framing share one honest limit and no combination of them can bury
     // the player at the top or bottom edge.

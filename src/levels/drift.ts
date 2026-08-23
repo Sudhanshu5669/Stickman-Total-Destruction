@@ -2,6 +2,7 @@ import { v } from "../core/math";
 import type { GameCtx } from "../core/types";
 import type { Builder } from "./builder";
 import type { LevelDef, LevelInfo } from "./types";
+import { SKY_ASSETS } from "./dressing";
 
 /**
  * The Drift — the island chain.
@@ -33,7 +34,7 @@ const OTHER = `${PACK}/Other Tiles1.png`;
 export const DRIFT_ASSETS: readonly string[] = [
   FLOOR, DECOR, HOUSE, OTHER,
   `${PACK}/Birch1.png`, `${PACK}/Birch2.png`, `${PACK}/Tall Grass.png`,
-  `${PACK}/hot air balloon.png`, `${PACK}/cloud1.png`, `${PACK}/cloud3.png`,
+  `${PACK}/hot air balloon.png`, ...SKY_ASSETS,
   `${PACK}/GandalfHardcore Background layers/Normal BG/Background Castle .png`,
   ...[1, 2, 3, 4, 5].map(
     (n) => `${PACK}/GandalfHardcore Background layers/Normal BG/GandalfHardcore Background layers_layer ${n}.png`,
@@ -56,6 +57,8 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   b.prop({ sheet: b.sheet(`${PACK}/Tall Grass.png`), tx: 0, ty: 0, tw: 3, th: 1, x: -34, y: G0, z: 12 });
   b.crowd(-27, G0, ["grunt", "grunt"], 2, null);
   b.scatter(-22, G0, 5, 2.5);
+  b.dress(-46, -19, G0, { density: 0.6, salt: 1 });
+  b.dress(-38, -30, G0, { kind: "camp", density: 0.55, pitch: 1.8, salt: 2 });
 
   // ---------------------------------------------------------------- the chain
   // Eight islands, climbing and widening apart. Seeded by `islands`, then furnished
@@ -87,6 +90,11 @@ function build(game: GameCtx, b: Builder): LevelInfo {
       b.gunner("grunt", isle.x + 3, top, -1, { behavior: "patrol", patrol: 2, gun: "smg" });
     }
 
+    // Turf on the island itself. A bare shelf is a platform; a shelf with a bush and
+    // two stones on it is a piece of ground that used to be somewhere.
+    b.dress(isle.x - isle.w / 2 + 1, isle.x + isle.w / 2 - 1, top,
+            { density: 0.55, pitch: 1.6, salt: 10 + i });
+
     // A plank bridge to the next island — the thing a player will shoot out from under
     // someone crossing it, which is the arena working as intended.
     if (!last) {
@@ -112,8 +120,11 @@ function build(game: GameCtx, b: Builder): LevelInfo {
   // Scenery in the void, so the drop reads as height rather than as an empty rectangle.
   b.prop({ sheet: b.sheet(`${PACK}/hot air balloon.png`), tx: 0, ty: 0, tw: 0.625, th: 1.09,
            x: 20, y: G0 + 26, scale: 4, z: -5, sway: 0.03 });
-  b.prop({ sheet: b.sheet(`${PACK}/cloud1.png`), tx: 0, ty: 0, tw: 4, th: 2, x: -6, y: G0 - 14, scale: 2.2, z: -6 });
-  b.prop({ sheet: b.sheet(`${PACK}/cloud3.png`), tx: 0, ty: 0, tw: 4, th: 2, x: 46, y: G0 - 20, scale: 2.6, z: -6 });
+  b.sky(-50, 130, G0 + 14, { heaviness: 0.5, clouds: 16 });
+  // Cloud *below* the chain as well as above it. This is the arena where the drop is
+  // the weapon, and nothing sells a drop like something white passing underneath the
+  // island you are standing on.
+  b.sky(-40, 120, G0 - 30, { heaviness: 0.8, clouds: 9, birds: 0 });
 
   return {
     spawn: v(-40, G0 + 1.2),
@@ -135,5 +146,8 @@ export const DRIFT: LevelDef = {
   accent: "#4cc8e0",
   assets: DRIFT_ASSETS,
   shape: "islands",
+  // No soil under the chain. This is the arena where the drop is the weapon, and a
+  // floor painted a metre below the islands took the drop away.
+  voidBelow: true,
   build,
 };
