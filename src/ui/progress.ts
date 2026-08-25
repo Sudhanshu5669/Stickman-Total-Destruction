@@ -64,52 +64,48 @@ function write(key: string, value: number) {
 }
 
 /**
- * The unlock ladder: round id, and the lifetime carnage that buys it.
+ * The arsenal: round id, and the lifetime carnage that buys it.
  *
- * The first five are free, and that is the most important decision in this file. A
- * player who arrives and is handed one gun has been shown a demo; a player handed five
- * absurd ones — including the rocket launcher — has been shown the game.
+ * **Every round costs nothing.** The whole nineteen-round arsenal is in your hands the
+ * first time the game opens, on a fresh save, with no ladder to climb.
  *
- * ## Where these numbers come from
+ * This is a sandbox, and a sandbox that withholds its toys is just a shorter sandbox.
+ * The old ladder — five free rounds and thirteen rungs priced out to roughly five hours
+ * of sustained destruction — was pacing borrowed from the campaign modes that no longer
+ * exist. What it actually did was hide the black hole, the nuke and the airliner from
+ * anyone who dropped in for ten minutes, which is most people. The reason to go back
+ * into an arena you have already flattened is that you have a different absurd thing to
+ * flatten it with, and that reason works just as well when the thing was there all along.
  *
- * Measured, not guessed. The attract-mode driver (`ai/demo.ts`) playing Long Meadow
- * earns about **1,100 carnage per second while it has targets in reach** — it cleared
- * the camp and the farm, 57 blocks and 6 kills, in the first fifteen seconds. A person
- * is slower than that: they walk, they aim, they change rounds, they stand and watch
- * the thing they just did. Call a realistic sustained rate **~350/sec**, and these
- * rungs fall roughly where the comments say.
+ * Carnage is still banked, still shown, and still pays the first-strike bounty — it is
+ * now a score rather than a currency.
  *
- * The ladder this replaced was scaled for the deleted modes and was out by about 30x
- * against these arenas: its first rung landed in under two seconds and the whole
- * arsenal came out inside twenty minutes, which is not a progression, it is an
- * unlock-everything button with a delay on it.
- *
- * The shape that matters: the first purchase arrives inside a minute — early enough to
- * teach that breaking things pays — and the gaps then widen steadily, so there is
- * always a partially-filled bar and the last few rounds are a genuine chase.
- *
- * These are still estimates from a bot. Real pacing needs a human playtest; see
- * `SYSTEMS.md` system 11.
+ * The shape of the table is kept (id plus cost) rather than collapsed to a plain list of
+ * ids, because `migrate()`, `nextUnlock()` and the menu's unlock bar all still read it,
+ * and because re-pricing a round is then a one-number edit rather than a rewrite. The
+ * Listing every round also keeps the table honest: `grenade` was absent before, which
+ * made it free by accident (an id with no entry costs zero) rather than on purpose.
  */
 export const ARSENAL: readonly (readonly [string, number])[] = [
-  ["chicken", 0],              // free — the identity round
-  ["watermelon", 0],           // free — splatters
-  ["anvil", 0],                // free — heavy
-  ["barrel", 0],               // free — explodes
-  ["rocket", 0],               // free — spectacle, and the reason the first minute sells
-  ["bowling", 20_000],         // ~1 min     bounces
-  ["tv", 60_000],              // ~3 min     a cone of glass at close range
-  ["stickman", 130_000],       // ~6 min     ragdolls firing ragdolls — the signature joke
-  ["sawblade", 210_000],       // ~10 min    ricochets and cuts
-  ["water", 340_000],          // ~16 min    a real fluid sim; a toy, so priced as one
-  ["fridge", 500_000],         // ~24 min    freeze, a mechanic rather than a bigger boom
-  ["piano", 730_000],          // ~35 min    crushing weight, and the chord
-  ["flamethrower", 1_050_000], // ~50 min    the fire sim, which burns on without you
-  ["car", 1_500_000],          // ~1h10      two tonnes that ploughs through, then detonates
-  ["elephant", 2_100_000],     // ~1h40      the big creature
-  ["plane", 2_900_000],        // ~2h20      an airliner
-  ["nuke", 4_200_000],         // ~3h20      apocalypse
-  ["blackhole", 6_300_000],    // ~5h        eats the level, then itself
+  ["chicken", 0],      // the identity round
+  ["watermelon", 0],   // splatters
+  ["anvil", 0],        // heavy
+  ["barrel", 0],       // explodes
+  ["rocket", 0],       // spectacle
+  ["bowling", 0],      // bounces
+  ["tv", 0],           // a cone of glass at close range
+  ["stickman", 0],     // ragdolls firing ragdolls — the signature joke
+  ["sawblade", 0],     // ricochets and cuts
+  ["water", 0],        // a real fluid sim
+  ["fridge", 0],       // freeze, a mechanic rather than a bigger boom
+  ["piano", 0],        // crushing weight, and the chord
+  ["flamethrower", 0], // the fire sim, which burns on without you
+  ["car", 0],          // two tonnes that ploughs through, then detonates
+  ["elephant", 0],     // the big creature
+  ["plane", 0],        // an airliner
+  ["nuke", 0],         // apocalypse
+  ["blackhole", 0],    // eats the level, then itself
+  ["grenade", 0],      // lobbed, bounces, two-second fuse — the hardest round to use well
 ];
 
 const COST = new Map(ARSENAL.map(([id, c]) => [id, c]));

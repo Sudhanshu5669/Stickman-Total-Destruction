@@ -10,11 +10,12 @@ contradicts in git history is intentionally dead._
 You are a stickman with a gun that fires things a gun has no business firing — chickens,
 sedans, pianos, elephants, other stickmen — into an arena full of hostile stickmen and
 buildings that are made of real rigid bodies. You pick an arena, you break it, you watch
-the physics engine solve the consequences, and the mess pays carnage. Carnage buys the
-next absurd round, which is a new reason to go back into an arena you already flattened.
+the physics engine solve the consequences, and the mess pays carnage. Every round is in
+your hands from the first launch — the reason to go back into an arena you already
+flattened is the round you have not fired at it yet.
 
-There is no story, no mission, no fail state, and nothing to read. The loop is
-**pick → break → laugh → unlock → go again.**
+There is no story, no mission, no fail state, nothing to read and nothing to earn. The
+loop is **pick → break → laugh → go again.**
 
 ## Genre
 
@@ -48,17 +49,26 @@ previous spec, which locked the game to procedural Canvas2D shapes.
 
 ## Audio
 
-**There is none.** Every sound effect and every music cue is removed. `src/fx/audio.ts`
-remains as a silent no-op facade with the same method surface so the 73 call sites stay
-put and audio can be reinstated later as a one-file change. The volume and mute controls
-are gone from the UI.
+**Music only.** Every synthesised sound *effect* is removed — impacts, gunfire,
+explosions, the lot — and `src/fx/audio.ts` keeps their 73 call sites as no-op methods so
+that reinstating them stays a one-file change.
+
+Licensed tracks live in `src/Assets/music` and are globbed, so adding one is dropping a
+file in. The menu keeps the first for itself and the arenas take the rest in rotation,
+crossfading over about two seconds when you enter or leave a fight, which is the one
+thing that makes a front end and an arena feel like the same game. Streamed through
+`<audio>` rather than decoded into WebAudio: a four-megabyte MP3 decoded up front is
+several seconds of silence at boot and tens of megabytes resident on a phone.
+
+**MUSIC** is a four-step control in the options panel — `OFF`/`LOW`/`MEDIUM`/`FULL`, with
+a real OFF — and `M` still mutes. Both persist.
 
 ## Scope
 
 Full small game, being **rebuilt**, not extended. The previous build's retention
 machinery (medals, daily streak, best-run bonus, leaderboard placing, coach prompts tied
-to missions) is cut. What survives is the physics, the ragdoll, the arsenal, and the
-unlock ladder.
+to missions) is cut. What survives is the physics, the ragdoll, and the arsenal — all
+nineteen rounds of it, unlocked from the start.
 
 ## Genre-specific answers
 
@@ -81,8 +91,9 @@ unlock ladder.
   are a floor, not a ceiling: enemies need to take cover, react to their building coming
   apart, coordinate loosely, retreat when losing, and stop being target practice that
   stands still while a piano lands on it.
-- **Progression: unlocks only.** Carnage buys ammo types on a tuned ladder. Medals,
-  daily streak, best-run bonus and rank are removed.
+- **Progression: none.** The whole arsenal is available on a fresh save; there is no
+  ladder to climb and nothing is withheld. Carnage is still banked and shown, as a
+  score. Medals, daily streak, best-run bonus and rank are removed.
 - **Tone: funny and satisfying, never confusing.** Comedy comes from the physics and the
   absurdity of the arsenal, surfaced with short readable callouts — not from written
   jokes, and not from a narrator.

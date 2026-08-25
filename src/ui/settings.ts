@@ -22,18 +22,23 @@ export const SHAKE_STEPS: readonly number[] = [0, 0.35, 0.7, 1];
 export const SHAKE_LABELS: readonly string[] = ["OFF", "LOW", "MEDIUM", "FULL"];
 
 /**
- * Master volume stops, as a multiplier on the mixer's master gain.
+ * Music volume stops, as a multiplier on the music ceiling in `fx/audio.ts`.
  *
  * Stepped for the same reason the shake control is: this is a canvas widget operated
  * with a thumb, and four hittable stops beat a track nobody can land on. The top stop
- * is the mix as it was tuned — nothing here can push the output above that, so the
- * limiter never sees a level it was not designed for.
+ * is the level the music was balanced at — nothing here can push the output above it.
  *
- * Deliberately *not* a replacement for mute. A player who wants silence reaches for
- * the speaker icon, and finding it at 25% instead would be a broken promise.
+ * The first stop is a real **OFF**, which is a change from the percentage scale this
+ * replaced (25/50/75/100). That scale was written when the mute key was the only way
+ * to silence the game and volume was deliberately not a substitute for it. Now that
+ * music is the only thing making a sound and the options panel is where people will
+ * look for it, a control that cannot reach silence is a control that sends players to
+ * the browser's tab-mute instead — and once they do that, they have muted the game for
+ * good and it will not be there when the effects mix comes back. M still toggles mute
+ * for a quick moment of quiet.
  */
-export const VOLUME_STEPS: readonly number[] = [0.25, 0.5, 0.75, 1];
-export const VOLUME_LABELS: readonly string[] = ["25", "50", "75", "100"];
+export const VOLUME_STEPS: readonly number[] = [0, 0.35, 0.7, 1];
+export const VOLUME_LABELS: readonly string[] = ["OFF", "LOW", "MEDIUM", "FULL"];
 
 interface Stored {
   shake: number;
@@ -131,13 +136,13 @@ export const settings = {
     save();
   },
 
-  /** Master gain the mixer should sit at, ignoring mute. */
+  /** Multiplier the music should sit at, ignoring mute. */
   get volume() {
     return VOLUME_STEPS[state.volume] ?? 1;
   },
 
   get volumeLabel() {
-    return VOLUME_LABELS[state.volume] ?? "100";
+    return VOLUME_LABELS[state.volume] ?? "FULL";
   },
 
   get muted() {

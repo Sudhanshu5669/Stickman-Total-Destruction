@@ -77,7 +77,7 @@ comfortably left behind is unloaded, so a 5 km run costs the same as a 50 m one.
 | `G` | God mode (invincible, infinite jetpack) — refused in campaign |
 | `F` | Restart the level |
 | `Esc` / `P` | Pause — Resume / Restart / Main Menu |
-| `M` | Mute |
+| `M` | Mute the music |
 | `F3` | Debug overlay (fps, bodies, particles) |
 
 In the menu: `←` `→` choose, `Enter` open/play, `Esc` back, or click a card and then the
@@ -86,8 +86,10 @@ big button.
 There is no controls screen. `src/ui/coach.ts` teaches one control at a time, in-game,
 beside the stickman, led by a picture rather than prose, and dismissed by doing the
 thing — a player who never touches the jetpack never gets a jetpack lesson. It can be
-switched off entirely from the pause menu (`CONTROL TIPS`), and screenshake has its own
-four-step control there too (`OFF`/`LOW`/`MEDIUM`/`FULL`) for players sensitive to it.
+switched off entirely from the pause menu (`CONTROL TIPS`), and screenshake and music
+have their own four-step controls there too (`OFF`/`LOW`/`MEDIUM`/`FULL`) — the first
+because motion sickness is not a matter of taste, the second because somebody is playing
+this where they should not be.
 
 **Recoil is a movement tool.** The heavy rounds kick hard enough to launch you across the
 map. Firing an elephant while standing still will put you on your back.
@@ -111,23 +113,25 @@ Barrel Roll · Tactical Regret (a nuke) · Singularity (a black hole, 3 rounds) 
 Hydro Cannon (a hose — puts out the fires below and douses anything flammable) ·
 Flamethrower (sets fires; wet targets won't catch)
 
-Round 1 of each is free the moment you fire it, so trying the arsenal pays for itself —
-see *Progression* below.
+Firing a round for the first time pays a one-off bounty, so trying the arsenal pays for
+itself — see *Progression* below.
 
 ## Progression
 
-Five rounds ship unlocked (chicken, watermelon, anvil, barrel, rocket — the four verbs a
-new player needs plus one round of pure spectacle). Everything else unlocks against
-lifetime **carnage**, earned by destroying things and banked at the end of every run
-(`src/ui/progress.ts`). The ladder is tuned against a measured earn rate so the first
-unlock (`bowling`, 2,000) lands at under a minute of play and no later gap ever exceeds
-about twelve minutes — there is always a partially-filled bar toward the next round.
+There isn't any, and that is deliberate. **Every round is unlocked from the first
+launch** — all nineteen, on a brand-new save, priced at zero in `ARSENAL`
+(`src/ui/progress.ts`). A sandbox that withholds its toys is just a shorter sandbox, and
+the reason to go back into an arena you already flattened is the round you have not
+fired at it yet, which works just as well when that round was there all along.
 
-On top of that, every finished run is scored for **medals** (one-off and repeatable
-destruction milestones), a **daily streak** with a grace day so missing one day doesn't
-reset it, and a lifetime **best run** bonus — all folded into the carnage the result
-card shows you earned. Ranks (VANDAL through HEAT DEATH) are cosmetic titles on top of
-lifetime carnage, spaced to stay roughly a session apart forever.
+Lifetime **carnage** is still earned by destroying things, still banked, and still shown
+on the menu and the HUD — it is a score now rather than a currency. Firing a round for
+the very first time pays a small first-strike bounty, once per round for as long as the
+save lives, because nineteen rounds are only an arsenal if you actually try them.
+
+The cost column in `ARSENAL` is kept rather than deleted, so re-pricing a round is a
+one-number edit: set a cost above zero and the menu's unlock bar, the unlock callout and
+the loadout gate all wake back up unchanged.
 
 Adding a new round is a single object literal — no new classes:
 
@@ -147,6 +151,22 @@ Adding a new round is a single object literal — no new classes:
 `makeCreature` instead of `makeRigid` gives you a jointed, flailing, screaming version of
 the same thing.
 
+## Music
+
+Two copyright-free drum-and-bass tracks by **Gwamm Music**, in `src/Assets/music`:
+
+- *Beneath the Stars* — the menu
+- *Through the Clouds* — the arenas
+
+Nothing names them in code. `src/fx/audio.ts` globs the folder, gives the first track to
+the menu and rotates the arenas through the rest, so adding a third is dropping an MP3
+in the folder and nothing else. They crossfade over ~2s on a mood change, each track
+holding its own playhead so bouncing between the menu and a fight sounds continuous
+rather than restarting.
+
+Sound *effects* are still stubbed out: `audio.ts` keeps every effect call site as a
+no-op, which is why the file is a music player wearing an effects facade.
+
 ## Layout
 
 ```
@@ -156,7 +176,7 @@ src/
   weapons/     ammo registry, the gun
   render/      draw helpers, stickman + creature renderers, prop art, backdrop, themes
   fx/          juice (unified impact curve), particles, decals, gore, fire/fluid/solids,
-               procedural WebAudio + generative music
+               music player (effects are stubbed — see `fx/audio.ts`)
   levels/      structure builder, worlds, campaign, endless chunks, weather hazards
   ai/          attract-mode driver
   ui/          HUD, menus, progress store, in-game coach, player settings

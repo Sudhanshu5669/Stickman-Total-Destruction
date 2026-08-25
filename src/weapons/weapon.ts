@@ -85,12 +85,10 @@ export class Weapon {
    * `ids` are matched against the arsenal in the order given, so a mission controls
    * both *what* you carry and which key each round sits on. Unknown ids are skipped.
    *
-   * With no list, you carry what you have **earned** — see `progress.ARSENAL`. That is
-   * the difference between a game that shows you everything in the first thirty
-   * seconds and one that keeps handing you something new. Campaign missions pass an
-   * explicit list and so ignore unlocks entirely: a mission is authored around its
-   * toys, and being told to clear it without them would be a worse experience than
-   * being handed a round you had not bought yet.
+   * With no list, you carry the whole arsenal — see `progress.ARSENAL`, where every
+   * round is priced at zero. Nothing is withheld from a fresh save. Missions still pass
+   * an explicit list, because a mission authored around three toys wants those three on
+   * the number keys rather than the whole arsenal to scroll past.
    *
    * An empty result falls back to the full arsenal rather than leaving the player
    * with no gun at all — a corrupt save should not be unplayable.

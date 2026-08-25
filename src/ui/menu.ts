@@ -2,12 +2,13 @@ import { ARENAS } from "../levels";
 import type { LevelDef } from "../levels/types";
 import { clamp, TAU } from "../core/math";
 import type { Ctx } from "../render/draw";
-import { settings, SHAKE_LABELS } from "./settings";
+import { settings, SHAKE_LABELS, VOLUME_LABELS } from "./settings";
 import { quality, TIER_LABELS } from "./quality";
 import { progress } from "./progress";
 import { AMMO_BY_ID } from "../weapons/ammo";
 import { gunSprite } from "../render/gunart";
 import { ammoSprite } from "../render/ammoart";
+import { sfx } from "../fx/audio";
 import { notchedPanel, INK, CREAM, GOLD, PANEL, PANEL_LIT, PANEL_DIM, MUTED } from "./chrome";
 
 /**
@@ -66,6 +67,7 @@ type UiAction =
   | { ui: "close" }
   | { ui: "shake"; step: number }
   | { ui: "quality"; step: number }
+  | { ui: "music"; step: number }
   | { ui: "tips" };
 
 export type MenuAction =
@@ -150,6 +152,7 @@ export class Menu {
       case "close": this.optionsOpen = false; break;
       case "shake": settings.setShakeStep(a.step); break;
       case "quality": quality.setStep(a.step); break;
+      case "music": settings.setVolumeStep(a.step); sfx.setVolumeStep(a.step); break;
       case "tips": settings.setTips(!settings.tips); break;
     }
   }
@@ -377,7 +380,7 @@ export class Menu {
       + 26 * k + 20 * k + 20 * k               // name, tagline, tag chips
       + 24 * k + playH                         // PLAY
       + 22 * k                                 // the keyboard hint
-      + 34 * k + 26 * k                        // the unlock bar's label and its track
+      + 34 * k                                 // the carnage line (see drawUnlockBar)
       + 20 * k,                                // pad above the screen edge
     );
     return { perRow, cardW, cardH, rows, gap, playH, height };
@@ -452,11 +455,16 @@ export class Menu {
   }
 
   /**
-   * The whole progression, in one bar at the bottom of the screen.
+   * The carnage line at the bottom of the screen.
    *
-   * Measured from the previous rung rather than from zero — at six million for the last
-   * round, a bar measured from zero barely twitches over a session and reads as "this is
-   * hopeless" rather than "nearly there". See `progress.nextUnlock`.
+   * Every round is free now (see `progress.ARSENAL`), so `nextUnlock` is always null and
+   * this always draws the one-line complete state: the lifetime total, and a reminder
+   * that the whole arsenal is already in hand.
+   *
+   * The bar itself is kept for the day a round is priced again. It measures from the
+   * previous rung rather than from zero — at six million for the last round, a bar
+   * measured from zero barely twitches over a session and reads as "this is hopeless"
+   * rather than "nearly there". See `progress.nextUnlock`.
    */
   private drawUnlockBar(ctx: Ctx, w: number, by: number, k: number) {
     const next = progress.nextUnlock();
@@ -507,13 +515,15 @@ export class Menu {
   }
 
   /**
-   * Options. Three controls, and no more than three.
+   * Options. Four controls, and no more than four.
    *
    * EFFECTS first because it is the one that decides whether the game runs at all on a
    * slow machine, and it says what it costs rather than hiding behind a number. Screen
    * shake next, because it is an accessibility control rather than a preference —
-   * motion sickness is not a matter of taste. Tips last, so a returning player can
-   * switch off a tutorial they have already had.
+   * motion sickness is not a matter of taste. MUSIC third: it is the loudest thing the
+   * game does to a room, the first setting anyone hunts for when they are playing
+   * somewhere they should not be, and it is a real OFF rather than a quiet. Tips last,
+   * so a returning player can switch off a tutorial they have already had.
    */
   private drawOptions(ctx: Ctx, w: number, h: number, k: number) {
     // The panel is modal, so it owns every click on the screen. Dropping the regions
@@ -527,7 +537,10 @@ export class Menu {
     ctx.fillRect(0, 0, w, h);
 
     const pw = Math.min(430 * k, w - 40 * k);
-    const ph = 300 * k;
+    // 300 held three rows; MUSIC adds one `drawSteps` row — 15 lead, 28 buttons, 22 gap
+    // — plus a little over, because CLOSE hangs off the *bottom* edge and at exactly
+    // 365 it ended up six pixels under CONTROL TIPS, reading as part of the same row.
+    const ph = 385 * k;
     const px = w / 2 - pw / 2;
     const py = h / 2 - ph / 2;
     notchedPanel(ctx, px, py, pw, ph, k, PANEL);
@@ -548,6 +561,8 @@ export class Menu {
 
     ry = this.drawSteps(ctx, rowX, ry, rowW, k, "SCREEN SHAKE",
       SHAKE_LABELS, settings.shakeStep, (i) => ({ kind: "ui", ui: "shake", step: i }));
+    ry = this.drawSteps(ctx, rowX, ry, rowW, k, "MUSIC",
+      VOLUME_LABELS, settings.volumeStep, (i) => ({ kind: "ui", ui: "music", step: i }));
     ry = this.drawToggle(ctx, rowX, ry, rowW, k, "CONTROL TIPS", settings.tips,
       { kind: "ui", ui: "tips" });
     void ry;

@@ -23,6 +23,10 @@
                   in terraces: pinning X alone leaves the camera at the *player's*
                   height, so a citadel thirty metres above the spawn photographs as
                   an empty sky
+    ?z=<px/m>     override the camera zoom. The framing logic picks a zoom that
+                  shows the whole fight, which is 40 px/m at a desktop window — fine
+                  for composition and useless for checking whether a one-metre prop
+                  is standing on the ground. 120 puts a stickman at chest height
     ?sel=<n>      on the menu, select the nth arena before shooting
 
   The player is made invulnerable on entry. Without it a fourteen-second unattended
@@ -38,6 +42,7 @@ const id = q.get("arena") || "proving";
 const settle = Number(q.get("t") || "1.2");
 const camX = q.get("x") === null ? null : Number(q.get("x"));
 const camY = q.get("y") === null ? null : Number(q.get("y"));
+const camZ = q.get("z") === null ? null : Number(q.get("z"));
 const sel = q.get("sel") === null ? null : Number(q.get("sel"));
 
 const ready = setInterval(() => {
@@ -77,6 +82,8 @@ const ready = setInterval(() => {
       g.camera.update(1 / 60, true);
       if (camX !== null) g.camera.pos.x = camX;
       if (camY !== null) g.camera.pos.y = camY;
+      // After `update`, which is what computes the framed zoom this is overriding.
+      if (camZ !== null) g.camera.zoom = camZ;
     };
     setInterval(settleCam, 8);
   }

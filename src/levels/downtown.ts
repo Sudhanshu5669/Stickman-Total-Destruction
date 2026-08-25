@@ -86,21 +86,37 @@ function build(game: GameCtx, b: Builder): LevelInfo {
    * ships exactly what a street needs — lamps, lights, bins, signs — and none of it had
    * ever been placed.
    *
-   * Streetlamps are three tiles stacked, because the sheet draws them that way: the
-   * head at (6,1) and two lengths of pole under it. Traffic lights are the same trick
-   * one column over. Both are props rather than blocks — a lamp post that survives a
-   * piano landing on it is less annoying than one that becomes debris in every fight.
+   * Streetlamps are a stack of one-metre tiles, because the sheet draws them that way:
+   * the head at (6,1), plain pole at (6,2) repeated for as much height as the post
+   * needs, and (6,3) — the same pole with a footplate — at the bottom. Traffic lights
+   * are the same trick one column over, and signs one further. All of them are props
+   * rather than blocks: a lamp post that survives a piano landing on it is less
+   * annoying than one that becomes debris in every fight.
+   *
+   * ## Standing on the pavement
+   *
+   * `prop.y` is the sprite's **bottom edge**, and every pole tile's art runs the full
+   * height of its cell, so the bottom tile of a post goes at `G0` exactly — no offset,
+   * no fudge. Getting that wrong is what left the whole street hovering: the posts were
+   * laid out downward from where their heads should be and stopped a tile short, so
+   * every lamp, light and sign on the boulevard floated about a metre and a half over
+   * the pavement with clear air under the footplate.
+   *
+   * So these build *upward* from the ground now. `POST` is the height of the pole part
+   * in whole tiles, and the head sits on top of it; four metres puts a lamp head at
+   * a bit over twice stickman height, which is what a streetlamp looks like.
    */
-  const lamp = (x: number) => {
-    b.prop({ sheet: deco, tx: 6, ty: 1, tw: 1, th: 1, x, y: G0 + 3.6, z: 6 });
-    b.prop({ sheet: deco, tx: 6, ty: 2, tw: 1, th: 1, x, y: G0 + 2.6, z: 6 });
-    b.prop({ sheet: deco, tx: 6, ty: 3, tw: 1, th: 1, x, y: G0 + 1.6, z: 6 });
+  const POST = 3;
+  /** A post: footplate, plain pole up to `POST`, and whatever head goes on top. */
+  const post = (x: number, tx: number, headTy: number) => {
+    b.prop({ sheet: deco, tx, ty: 3, tw: 1, th: 1, x, y: G0, z: 6 });
+    for (let i = 1; i < POST; i++) {
+      b.prop({ sheet: deco, tx, ty: 2, tw: 1, th: 1, x, y: G0 + i, z: 6 });
+    }
+    b.prop({ sheet: deco, tx, ty: headTy, tw: 1, th: 1, x, y: G0 + POST, z: 6 });
   };
-  const signal = (x: number, ty: number) => {
-    b.prop({ sheet: deco, tx: 7, ty, tw: 1, th: 1, x, y: G0 + 3.4, z: 6 });
-    b.prop({ sheet: deco, tx: 7, ty: 2, tw: 1, th: 1, x, y: G0 + 2.4, z: 6 });
-    b.prop({ sheet: deco, tx: 7, ty: 3, tw: 1, th: 1, x, y: G0 + 1.4, z: 6 });
-  };
+  const lamp = (x: number) => post(x, 6, 1);
+  const signal = (x: number, ty: number) => post(x, 7, ty);
   /** Litter and bins, which is what actually makes a street look used. */
   const kerb = (x: number, n: number) => {
     const cells: [number, number][] = [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]];
@@ -109,9 +125,20 @@ function build(game: GameCtx, b: Builder): LevelInfo {
       b.prop({ sheet: deco, tx: c[0], ty: c[1], tw: 1, th: 1, x: x + i * 1.5, y: G0, z: 7 });
     }
   };
+  /**
+   * A road sign: a thin post from column 8, with a sign face on top.
+   *
+   * Shorter than a lamp on purpose — a street where every vertical thing is the same
+   * height is a fence. The signs themselves are 16px sprites packed into the *top
+   * right* quadrant of their 32px cell (measured: x16-31, y0-15), which is why the head
+   * is lifted half a tile: at a whole tile the face floats half a metre above the post
+   * it is bolted to. The horizontal packing needs no correction, because the pole in
+   * column 8 sits right of centre by the same amount the faces do.
+   */
   const sign = (x: number, tx: number, ty: number) => {
-    b.prop({ sheet: deco, tx, ty, tw: 1, th: 1, x, y: G0 + 2.2, z: 6 });
-    b.prop({ sheet: deco, tx: 8, ty: 3, tw: 1, th: 1, x, y: G0 + 1.2, z: 6 });
+    b.prop({ sheet: deco, tx: 8, ty: 3, tw: 1, th: 1, x, y: G0, z: 6 });
+    b.prop({ sheet: deco, tx: 8, ty: 2, tw: 1, th: 1, x, y: G0 + 1, z: 6 });
+    b.prop({ sheet: deco, tx, ty, tw: 1, th: 1, x, y: G0 + 1.5, z: 6 });
   };
 
   for (let x = -68; x < 280; x += 13) lamp(x);

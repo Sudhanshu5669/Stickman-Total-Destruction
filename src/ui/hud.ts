@@ -219,6 +219,10 @@ export class Hud {
     // The level name is the least useful thing in the panel and the first to go when
     // there is no room for it.
     if (!narrow) rows.push([s.levelName.toUpperCase(), 10 * k, 800, "rgba(244,241,232,0.32)"]);
+    // M is a one-key toggle with no other feedback anywhere: without this line the game
+    // going quiet is indistinguishable from the game being broken, which is exactly the
+    // conclusion a player reaches when they hit M by accident reaching for N.
+    if (s.muted) rows.push(["♪ MUTED  ·  M", 10 * k, 800, "rgba(255,210,63,0.62)"]);
 
     let content = 0;
     for (const [str, size, weight] of rows) content = Math.max(content, measure(ctx, str, size, weight));
