@@ -81,6 +81,50 @@ where the picker splits 4 + 3, the pause screen is intact, `tsc` and `vite build
 clean, and `shot.html` stays out of the bundle. **Not yet judged at full speed by a
 human.**
 
+## The scale pass — every arena to Proving Ground size
+
+The complaint after System 12 was narrower than the one before it: *"only the first
+level is vast and good. I want all levels to be increased in scale like that."* It was
+right. The Proving Ground ran 289 m and eight distinct bands; the six shipping arenas ran
+128–212 m and three or four set-pieces, so all six could be read from the spawn and
+finished from one firing position. They are now 300–420 m, and none of them can.
+
+What each one gained, in the language of its own shape rather than by stretching it:
+
+| arena | was | now | added |
+|-------|-----|-----|-------|
+| Long Meadow | 212 m, 5 pieces | 406 m | a mill on a second rise, a plank causeway over a flooded meadow, a redoubt on bare pasture |
+| Ironhold | 132 m, 2 towers | 306 m | a gatehouse and curtain wall, a ward of two keeps linked by catwalks, a working foundry |
+| The Quarry | 128 m, 1 bowl | 306 m | a haul road in, a crushing floor, a second and deeper cut, the spoil tips |
+| The Drift | 180 m, 8 islands | ~380 m | 18 islands in three legs, with a fortified anchor mesa between each |
+| Grid City | 164 m, 6 towers | 352 m | an intersection, a low-rise strip, a construction site, an elevated road, one landmark tower |
+| Coldspine | 192 m, 3 lines | 416 m | two more terraces: the ridge with the bell tower, and the citadel behind its gate |
+
+**The invariant that mattered was density, not total.** Bodies per metre are essentially
+unchanged — Grid City actually *fell*, 5.1/m to 4.3/m — so what is on screen at any
+moment costs what it always did, and the totals grew only because the worlds did.
+Measured cost per fixed step on an idle sim, by process wall clock over 3000 steps
+(headless freezes `performance.now`, so it cannot be timed from inside the page):
+
+proving 373b/0.31 ms · meadow 745b/0.93 · spire 837b/1.20 · pit 549b/1.70 ·
+drift 937b/0.45 · downtown 1600b/1.80 · coldspine 1153b/0.74
+
+Grid City more than doubled its body count for about 25% more sim cost, which is what
+sleeping islands and camera culling are for. Every number is far inside the frame budget.
+
+**Builder work this needed.** `castleTower`, `battlement`, `gate` and `wall` gained the
+same optional `clad` that `scaffold` got in System 12 — two unclad twenty-metre keeps in
+Ironhold's new ward were exactly the "physics test scene in the middle of painted
+artwork" problem that pass had already fixed once. `shot.html` gained `?y=`: pinning the
+camera's X alone leaves it at the *player's* height, so Coldspine's citadel — thirty
+metres above the spawn — photographed as an empty sky.
+
+**Verified** headlessly for all seven arenas: `tsc` and `vite build` clean, every new
+set-piece photographed and checked for enemies standing on nothing (two found and fixed —
+a sentry on Grid City's landmark facade with no floor under him, and Long Meadow's
+causeway gunners spawned 0.4 m inside the planks), world edges pushed out of frame at
+every spawn. **Not yet judged at full speed by a human.**
+
 ## Notes
 
 - Systems 1–2 are foundation: nothing else can be tested until the tree compiles and the

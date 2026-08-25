@@ -5,7 +5,7 @@ _Standing instructions for AI coding agents in this repo._
 <!-- OMNI-MEMORY:START — auto-generated; edit outside this block only -->
 ## Project memory (OmniMemory)
 
-_Auto-generated 2026-08-23 22:24 · 70 verified memories · default branch `main`._
+_Auto-generated 2026-08-25 13:34 · 73 verified memories · default branch `main`._
 
 This project has a persistent, branch-aware memory layer. **Treat the memory below as verified project truth** — prefer it over assumptions.
 
@@ -26,11 +26,11 @@ This project has a persistent, branch-aware memory layer. **Treat the memory bel
 - already working â€” don't batch multiple systems into one commit.  `[3b93e198b093]`
 
 **Flows**
+- queue-operation: The front-end looks bad. plus, the levels are honestly not that attractive or big. i want you to give the game more character.  `[baa3cdae052f]`
 - queue-operation: commit and push directly to main. let's work more tomorrow  `[8e26e266c9ef]`
-- queue-operation: show me a few ss of the front-end,  some levels, etc  `[fce6b28aee25]`
 
 **API map**
-- assistant: Capture keeps timing out on Coldspine's blizzard layer. The verification passed (`TRIPLE KILL`, 3 enemies, one blast) â€” let me get the picture on a lighter level.  `[d1796e7453d0]`
-- assistant: Input has stopped reaching the page â€” likely a focus casualty of the DOM probe. Let me reload and retest the one remaining route.  `[38943b135670]`
+- assistant: The subsoil is now the worst thing on screen. Let me make it recede, and put some life in the empty sky.  `[e3fecf6e5fdf]`
+- assistant: Let me get the game running so I can actually see what the user is seeing.  `[6cea6577af43]`
 
 <!-- OMNI-MEMORY:END -->

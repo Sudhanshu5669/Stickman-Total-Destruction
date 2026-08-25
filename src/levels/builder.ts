@@ -328,7 +328,7 @@ export class Builder {
   }
 
   /** Free-standing wall, one brick course at a time. */
-  wall(x: number, baseY: number, w: number, h: number, material: MaterialId, brick = 0.55) {
+  wall(x: number, baseY: number, w: number, h: number, material: MaterialId, brick = 0.55, skin?: BlockSkin) {
     const rows = Math.max(1, Math.round(h / brick));
     const bh = h / rows;
     const cols = Math.max(1, Math.round(w / (brick * 1.6)));
@@ -337,7 +337,7 @@ export class Builder {
       const offset = r % 2 ? bw * 0.5 : 0;
       const n = r % 2 ? cols - 1 : cols;
       for (let c = 0; c < n; c++) {
-        this.block(x - w / 2 + bw / 2 + c * bw + offset, baseY + bh / 2 + r * bh, bw * 0.97, bh * 0.94, material);
+        this.block(x - w / 2 + bw / 2 + c * bw + offset, baseY + bh / 2 + r * bh, bw * 0.97, bh * 0.94, material, 0, true, skin);
       }
     }
   }
@@ -399,11 +399,13 @@ export class Builder {
   battlement(
     x: number, baseY: number, w: number, h: number,
     material: MaterialId = "concrete", guards: EnemyKind[] = [],
+    clad?: { sheet: Sheet; tx: number; ty: number },
   ) {
-    this.wall(x, baseY, w, h, material, 0.62);
+    const skin = clad ? this.cell(clad.sheet, clad.tx, clad.ty) : undefined;
+    this.wall(x, baseY, w, h, material, 0.62, skin);
 
     const deck = baseY + h;
-    this.block(x, deck + 0.2, w, 0.4, material);
+    this.block(x, deck + 0.2, w, 0.4, material, 0, true, skin);
     const top = deck + 0.4;
 
     const merlonW = 0.55;
@@ -414,7 +416,7 @@ export class Builder {
 
     const crenels: number[] = [];
     for (let i = 0; i < count; i++) {
-      this.block(start + i * pitch, top + 0.4, merlonW, 0.8, material);
+      this.block(start + i * pitch, top + 0.4, merlonW, 0.8, material, 0, true, skin);
       if (i < count - 1) crenels.push(start + i * pitch + pitch / 2);
     }
 
@@ -425,31 +427,41 @@ export class Builder {
     return top;
   }
 
-  /** Square keep tower: shaft, crenellated crown and an optional pitched roof. */
+  /**
+   * Square keep tower: shaft, crenellated crown and an optional pitched roof.
+   *
+   * `clad` tiles a source cell over every course, exactly as `scaffold` does. It is
+   * not decoration: an unclad keep is a twenty-metre grey rectangle, and two of them
+   * standing in an arena whose every other surface is painted artwork is the single
+   * fastest way to make a level look unfinished. Any arena built from a tileset should
+   * pass it.
+   */
   castleTower(opts: {
     x: number; baseY: number; w: number; height: number;
     material?: MaterialId; roof?: boolean; guards?: EnemyKind[];
+    clad?: { sheet: Sheet; tx: number; ty: number };
   }) {
     const mat = opts.material ?? "concrete";
+    const skin = opts.clad ? this.cell(opts.clad.sheet, opts.clad.tx, opts.clad.ty) : undefined;
     const courses = Math.max(2, Math.round(opts.height / 0.85));
     const ch = opts.height / courses;
     for (let i = 0; i < courses; i++) {
       const y = opts.baseY + ch / 2 + i * ch;
-      this.block(opts.x - opts.w / 2 + 0.3, y, 0.6, ch * 0.96, mat);
-      this.block(opts.x + opts.w / 2 - 0.3, y, 0.6, ch * 0.96, mat);
+      this.block(opts.x - opts.w / 2 + 0.3, y, 0.6, ch * 0.96, mat, 0, true, skin);
+      this.block(opts.x + opts.w / 2 - 0.3, y, 0.6, ch * 0.96, mat, 0, true, skin);
       // Arrow slit every third course, otherwise fill the middle in.
-      if (i % 3 === 1) this.block(opts.x, y, opts.w - 1.2, ch * 0.3, mat);
-      else this.block(opts.x, y, opts.w - 1.2, ch * 0.96, mat);
+      if (i % 3 === 1) this.block(opts.x, y, opts.w - 1.2, ch * 0.3, mat, 0, true, skin);
+      else this.block(opts.x, y, opts.w - 1.2, ch * 0.96, mat, 0, true, skin);
     }
     const top = opts.baseY + opts.height;
     const capW = opts.w + 0.5;
-    this.block(opts.x, top + 0.2, capW, 0.4, mat);
+    this.block(opts.x, top + 0.2, capW, 0.4, mat, 0, true, skin);
     const deck = top + 0.4;
 
     // Corner merlons only. Ringing the whole cap leaves nowhere for a guard to stand.
     const merlonW = 0.5;
     for (const s of [-1, 1]) {
-      this.block(opts.x + s * (capW / 2 - merlonW / 2), deck + 0.4, merlonW, 0.8, mat);
+      this.block(opts.x + s * (capW / 2 - merlonW / 2), deck + 0.4, merlonW, 0.8, mat, 0, true, skin);
     }
 
     if (opts.roof) {
@@ -473,15 +485,19 @@ export class Builder {
   }
 
   /** Gatehouse: two piers with a stepped arch between them. */
-  gate(x: number, baseY: number, width: number, height: number, material: MaterialId = "concrete") {
+  gate(
+    x: number, baseY: number, width: number, height: number, material: MaterialId = "concrete",
+    clad?: { sheet: Sheet; tx: number; ty: number },
+  ) {
+    const skin = clad ? this.cell(clad.sheet, clad.tx, clad.ty) : undefined;
     const pier = 0.9;
-    this.block(x - width / 2 - pier / 2, baseY + height / 2, pier, height, material);
-    this.block(x + width / 2 + pier / 2, baseY + height / 2, pier, height, material);
+    this.block(x - width / 2 - pier / 2, baseY + height / 2, pier, height, material, 0, true, skin);
+    this.block(x + width / 2 + pier / 2, baseY + height / 2, pier, height, material, 0, true, skin);
     const steps = 4;
     for (let i = 0; i < steps; i++) {
       const t = (i + 1) / (steps + 1);
       const span = width * (1 - t * 0.72);
-      this.block(x, baseY + height + 0.25 + i * 0.5, span + pier, 0.5, material);
+      this.block(x, baseY + height + 0.25 + i * 0.5, span + pier, 0.5, material, 0, true, skin);
     }
     // Portcullis.
     for (let i = 0; i < 4; i++) {
