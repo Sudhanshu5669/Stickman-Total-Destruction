@@ -56,7 +56,7 @@ export class Weapon {
   /**
    * Pays a one-off bounty the first time each round is ever fired.
    *
-   * Eighteen rounds is only an arsenal if the player tries them. Left alone, most
+   * Twenty rounds is only an arsenal if the player tries them. Left alone, most
    * players find three they like in the first minute and never press `4` again, which
    * quietly deletes two thirds of the game — so curiosity gets paid for, once per round,
    * for as long as the save lives.
@@ -233,7 +233,7 @@ export class Weapon {
    * Draws the gun in world space, rotated to `angle` and pivoted at the hand.
    *
    * Pixel art where there is art, procedural shapes where there is not. The fallback is
-   * not dead code: it is what lets a nineteenth round be added and played with before
+   * not dead code: it is what lets a new round be added and played with before
    * anybody has drawn it, and it is what would still be on screen if a future sprite
    * sheet failed to load.
    */

@@ -315,6 +315,7 @@ class Sfx {
   steam(_at?: V | null) {}
   splash(_strength?: number, _at?: V | null) {}
   ricochet(_at?: V | null) {}
+  balloonPop(_at?: V | null) {}
   whoosh(_strength?: number, _at?: V | null) {}
   pianoCrash(_at?: V | null) {}
   jetEngine(_at?: V | null) {}

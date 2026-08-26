@@ -32,7 +32,7 @@
  * one. That is the line between a performance setting and a worse game.
  *
  * Water and fire are weapons, not effects — the hose and the flamethrower are two of
- * the nineteen rounds. Their budgets shrink; they are never switched off.
+ * the rounds. Their budgets shrink; they are never switched off.
  */
 
 const KEY = "stickman.quality.v1";

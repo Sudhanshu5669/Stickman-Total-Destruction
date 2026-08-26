@@ -53,6 +53,13 @@ export interface ProjectileConfig {
    * gimmick, and the reason `PhysOwner.freeze` exists.
    */
   freeze?: { radius: number };
+  /**
+   * Ties balloons to everything it touches. `radius` is small for the same reason the
+   * fridge's is — it should read as "the bunch landed on it", not as an area effect —
+   * and `balloons` stacks onto whatever the target is already carrying, which is how a
+   * wall too heavy for one round goes up on the second. See `fx/buoyancy.ts`.
+   */
+  buoy?: { balloons: number; radius: number; duration: number };
   /** Flat extra damage applied to whatever it touches, on top of kinetic damage. */
   bonusDamage: number;
   impactSound: ImpactSound;
@@ -253,6 +260,16 @@ export class RigidProjectile implements Actor, PhysOwner {
     }
 
     if (c.freeze) this.freezeAround(point, other);
+    // Anything landing hard enough to be felt pops balloons it lands next to. This is
+    // what makes a floated building something the player can choose to bring down,
+    // rather than something they wait out.
+    //
+    // Ordered *before* the attach below on purpose: a bunch tied on this frame sits
+    // well within 1.3 m of its own contact point, so running these the other way round
+    // has the round pop the balloons it just stapled on.
+    if (kj > 2) this.game.balloons.popNear(point, 1.3);
+
+    if (c.buoy && kj > 0.2) this.balloonAround(point, other);
 
     if (c.splat && kj > 1.2) {
       this.game.particles.blood(point.x, point.y, 16, normal, 9, c.splat.color);
@@ -298,6 +315,39 @@ export class RigidProjectile implements Actor, PhysOwner {
     this.game.particles.dust(point.x, point.y, 6, 2.2, "#e4f7ff");
   }
 
+  /**
+   * Staples balloons to the thing that was hit and to anything sharing the contact
+   * point, so a round into a wall catches the neighbouring courses too. Deliberately
+   * skips the projectile itself: a bunch of balloons that floats away with its own
+   * clamp still attached is a round that never lands.
+   */
+  private balloonAround(point: V, other: PhysOwner | null) {
+    const b = this.cfg.buoy!;
+    const seen = new Set<PhysOwner>();
+    if (other && other.kind !== "terrain") {
+      seen.add(other);
+      this.game.balloons.attach(other, b.balloons, b.duration);
+    }
+    for (const o of this.game.physics.ownersInRadius(point, b.radius)) {
+      if (o === this || seen.has(o) || o.kind === "terrain") continue;
+      seen.add(o);
+      // The full bunch, not a share of it.
+      //
+      // The first cut gave neighbours half, on the theory that the block you actually
+      // hit should be the one that lifts. In a wall that is exactly wrong: a single
+      // block floating at a quarter of a fall cannot raise the four courses stacked on
+      // top of it, so the round decorated a wall and nothing moved. What has to float
+      // is a *piece of structure*, which means everything the radius catches lifts at
+      // the same rate or none of it lifts at all.
+      this.game.balloons.attach(o, b.balloons, b.duration);
+    }
+    this.game.particles.sparks(point.x, point.y, 8, 5, "#ffd23f");
+    // Consumed by the act of tying itself on. Without this the clamp keeps bouncing
+    // around the level stapling balloons to everything it grazes, which is funny for
+    // about four seconds and then is just every block in the world going up at once.
+    this.dead = true;
+  }
+
   private playImpactSound(strength: number) {
     switch (this.cfg.impactSound) {
       case "ricochet": sfx.ricochet(); break;
@@ -323,6 +373,7 @@ export class RigidProjectile implements Actor, PhysOwner {
     const g = this.game;
     g.physics.explode(p, e.radius, e.force, e.damage, this);
     g.alertEnemiesNear(p, e.radius * 2.6);
+    g.balloons.popNear(p, e.radius);
 
     if (e.nuke) {
       // The nuke gets its own presentation: white-out, ring, mushroom column.
@@ -361,6 +412,10 @@ export class RigidProjectile implements Actor, PhysOwner {
     at(ctx, t.x, t.y, this.body.rotation(), () => {
       this.cfg.draw(ctx, this.cfg.w, this.cfg.h, this.game.time);
     });
+  }
+
+  eachBody(fn: (body: RAPIER.RigidBody) => void) {
+    if (!this.dead) fn(this.body);
   }
 
   cullPos() {

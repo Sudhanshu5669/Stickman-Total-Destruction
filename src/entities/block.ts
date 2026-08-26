@@ -274,6 +274,11 @@ export class Block implements Actor, PhysOwner {
     this.game.particles.dust(p.x, p.y, 4, 1.6, "#e4f7ff");
   }
 
+  /** One body, and none at all once it has been destroyed. See `PhysOwner.eachBody`. */
+  eachBody(fn: (body: RAPIER.RigidBody) => void) {
+    if (!this.dead) fn(this.body);
+  }
+
   /** Frees every block near `at` — used when one of them is destroyed. */
   private disturbNeighbours(at_: V, radius: number) {
     for (const o of this.game.physics.ownersInRadius(at_, radius)) {

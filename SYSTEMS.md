@@ -20,6 +20,7 @@ Status: `pending` · `building` · `testing` · `done`
 | 11 | **Feel pass** — HUD clarity, comedy callouts, satisfaction on every kill | **done** | PASS 2026-08-23. **Callouts** (`fx/callout.ts`): deaths named from what the physics did — SQUASHED / GRAVITY WINS / BOWLED OVER / COLLATERAL / OBLITERATED / TAKEN APART / DISMEMBERED, off `ragdoll.lastHitKind`, plus DOUBLE→QUAD KILL and MASSACRE. Kills batch in a 0.22 s window so one rocket into a stairwell prints one line, not five overlapping. Verified live in Long Meadow and Coldspine: a 2-enemy blast gave exactly one DOUBLE KILL beside the individual +points, a 3-enemy blast one TRIPLE KILL. Table + window boundary also checked directly (13/13 branches; 2 inside → DOUBLE, 2 outside → two singles, trickle does not extend the window). **HUD** moved into the menu's language: `ui/chrome.ts` holds the single notchedPanel/palette both screens import; the last `roundRect`, `shadowBlur` and panel gradient in the game are gone, health/fuel are cell meters. Verified by render over a deliberately pale background at 1100×560 — caught and fixed the HP number being chopped by the new cell gaps. **Known follow-ups:** a callout on a kill at your feet is born under the ammo plate and only clears as it drifts up (clamp the popup's screen Y); the 0.22 s window is correct but has not been judged for *feel* at full speed; kills are not attributed to the round that caused them (deliberate — see `ragdoll.lastHitKind` doc) |
 | 12 | **Character pass** — the front end, and arenas that look like places | **done** | PASS 2026-08-23 — see below |
 | 13 | **Perf pass** — frame budget on the slow-PC floor | pending | Holds 60 on High mid-range, holds 60 on Low with the budget throttled |
+| 14 | **Party Supplies** — the buoyancy round | **done** | PASS 2026-08-26 — see below |
 
 ## System 12 — the character pass
 
@@ -124,6 +125,68 @@ set-piece photographed and checked for enemies standing on nothing (two found an
 a sentry on Grid City's landmark facade with no floor under him, and Long Meadow's
 causeway gunners spawned 0.4 m inside the planks), world edges pushed out of frame at
 every spawn. **Not yet judged at full speed by a human.**
+
+## System 14 — Party Supplies
+
+The first new round since the Sandbox Reset, and the reason the spec's "no new ammo
+types" non-goal was amended rather than ignored: the arsenal's nineteen rounds shared
+about eleven physical behaviours, so the shortage was verbs, not content. This one claims
+**buoyancy**, which nothing else did.
+
+**What it is.** A bunch of balloons on a steel clamp. It staples itself to whatever it
+hits plus everything within 2.4 m, and those things go up, hang, and come back down as
+the balloons pop.
+
+**The three decisions worth keeping.**
+
+- **Lift is a mass, not a force.** Net gravity scale is `1 - (balloons * LIFT_KG) / mass`.
+  A force tuned at -26 is a different weapon on The Drift at -9 — the same trap
+  `TUNE.jetNetAccel` was written to avoid — and a mass ratio is also what real buoyancy
+  is, since displaced-air weight scales with gravity exactly as the object's does.
+- **The ascent cap is tuned against the camera.** The frame sees about 10 m above the
+  player. At the 7 m/s this started on, a floated wall cleared the top of the screen in
+  a second and a half and spent four seconds out of sight before the wreckage came back,
+  which throws away the entire payoff. 2.8 m/s against the pop schedule peaks at ~8 m.
+  It reads better too: a balloon that leaps is a launch, a balloon that drifts is a
+  balloon.
+- **Nothing holds a Rapier handle across frames.** `PhysOwner.eachBody` (new, one method,
+  implemented by `Block`, `Ragdoll` and `RigidProjectile`) yields nothing once an owner's
+  bodies are gone, so an empty visit *is* the signal to drop the cluster rather than
+  something to defend against. `Ragdoll` guards on `disposed`, not `dead`, on purpose: a
+  dead stickman is still a pile of live bodies and balloons tied to one should keep
+  lifting it.
+
+**Four bugs found and fixed while testing, all of them by looking rather than reasoning.**
+
+1. The balloon shading normalised sideways against the *local* half-width, so every row
+   ran the full -1..1 and the two-pixel-wide crown got the same terminator as the
+   equator. The whole top flooded to the light value and the sprite read as a teardrop.
+   Fixed by shading a sphere and clipping it to the balloon, which is the care `Px.ball`
+   already documents.
+2. Neighbours were given half a bunch, on the theory that the block actually struck
+   should lift first. In a wall that is exactly backwards: one block floating at a
+   quarter of a fall cannot raise the four courses on top of it, so the round decorated
+   a wall and nothing moved.
+3. The velocity cap was a proportional shave, which against a constant acceleration
+   settles wherever the two balance — measured 3.3 m/s against a cap of 2.8. Hard clamp
+   instead; it does not make ragdolls buzz, because every bone in a cluster is clamped to
+   the same number on the same step so the joints have no differential to fight.
+4. `popNear` ran *after* the attach in `onImpact`, so the round popped the balloons it
+   had just tied on. It only appeared to work because a fresh tether's anchor was still
+   at the world origin — which was itself the bug underneath, and is now resolved at
+   attach time.
+
+**Verified in a real browser** (Playwright, `index.html` rather than `shot.html` — the
+harness pins the camera every 8 ms and any framing judgement made through it is measuring
+the harness, which this file has been caught by before). Full arc photographed at six
+points: lift → apex → pop → tumble → smash, ending in a x2 CHAIN and 2 blocks smashed
+from the *fall*, which is where the round's real score comes from. Flamethrower on a
+floating wall: 45 balloons → 29 → 5 → 0, wall lands. Rocket into one: 44 → 2 in a single
+blast. Ragdoll target: 6 balloons across 6 distinct bones, still shooting at the player
+on the way up. 60 fps with 48 balloons live and 390 bodies; zero console errors in every
+run. `tsc` and `vite build` clean.
+
+**Not yet judged at full speed by a human.**
 
 ## Notes
 

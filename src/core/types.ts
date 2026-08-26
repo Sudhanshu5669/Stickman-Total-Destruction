@@ -5,6 +5,7 @@ import type { Decals } from "../fx/decals";
 import type { KillFacts } from "../fx/callout";
 import type { WaterSim } from "../fx/fluid";
 import type { FireSim } from "../fx/fire";
+import type { BalloonSim } from "../fx/buoyancy";
 import type { Ctx } from "../render/draw";
 import type { Theme } from "../render/theme";
 import type { V } from "./math";
@@ -57,6 +58,8 @@ export interface GameCtx {
   readonly water: WaterSim;
   /** Flame gas plus the heat ledger that decides what is alight and what spreads. */
   readonly fire: FireSim;
+  /** Everything currently hanging from balloons. Fed by the Party Supplies round. */
+  readonly balloons: BalloonSim;
   readonly camera: Camera;
   /** Palette of the world currently loaded. */
   readonly theme: Theme;

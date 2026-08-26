@@ -103,15 +103,16 @@ uncontrollable on the other. It cuts out while you are knocked down.
 
 ## The arsenal
 
-18 rounds, all defined as data in `src/weapons/ammo.ts`:
+20 rounds, all defined as data in `src/weapons/ammo.ts`:
 
 Chicken Cannon · Rocket Launcher · Sedan Slinger · Jetliner Blaster · Elephant Gun ·
 Human Resources (fires screaming ragdolls) · Anvil Express · Grand Finale (a piano, which
 plays a chord when it lands) · Cold Storage (flash-freezes whatever it touches) ·
+**Party Supplies** (ties balloons to whatever it hits — see *Buoyancy* below) ·
 Perfect Game (bowling ball) · Melon Repeater · Buzzsaw Barrage · Static Discharge ·
 Barrel Roll · Tactical Regret (a nuke) · Singularity (a black hole, 3 rounds) ·
 Hydro Cannon (a hose — puts out the fires below and douses anything flammable) ·
-Flamethrower (sets fires; wet targets won't catch)
+Flamethrower (sets fires; wet targets won't catch) · Frag Grenade
 
 Firing a round for the first time pays a one-off bounty, so trying the arsenal pays for
 itself — see *Progression* below.
@@ -119,7 +120,7 @@ itself — see *Progression* below.
 ## Progression
 
 There isn't any, and that is deliberate. **Every round is unlocked from the first
-launch** — all nineteen, on a brand-new save, priced at zero in `ARSENAL`
+launch** — all twenty, on a brand-new save, priced at zero in `ARSENAL`
 (`src/ui/progress.ts`). A sandbox that withholds its toys is just a shorter sandbox, and
 the reason to go back into an arena you already flattened is the round you have not
 fired at it yet, which works just as well when that round was there all along.
@@ -127,7 +128,7 @@ fired at it yet, which works just as well when that round was there all along.
 Lifetime **carnage** is still earned by destroying things, still banked, and still shown
 on the menu and the HUD — it is a score now rather than a currency. Firing a round for
 the very first time pays a small first-strike bounty, once per round for as long as the
-save lives, because nineteen rounds are only an arsenal if you actually try them.
+save lives, because twenty rounds are only an arsenal if you actually try them.
 
 The cost column in `ARSENAL` is kept rather than deleted, so re-pricing a round is a
 one-number edit: set a cost above zero and the menu's unlock bar, the unlock callout and
@@ -262,6 +263,29 @@ speed, one query per bullet per frame, and rendered as a stretched tracer becaus
 covering 1.3 m per frame is otherwise invisible. Incoming fire is charged at face value
 rather than through the player's self-damage discount (which exists so your own rocket
 blast doesn't kill you at the range this game is played at) — see `Game.target()`.
+
+**Buoyancy** (`fx/buoyancy.ts`) is what the Party Supplies round leaves behind. A
+cluster of balloons is tied to a `PhysOwner` and the whole owner's net gravity scale
+becomes `1 - (balloons * LIFT_KG) / mass`, so lift is expressed as *a mass one balloon
+can carry* rather than as a force. That is both physically right — real buoyancy is
+displaced-air weight, which scales with gravity exactly as the object's weight does — and
+right for this game, for the same reason `TUNE.jetNetAccel` exists: a force tuned on
+Earth is a different weapon on The Drift at -9.
+
+The curve is the design. Four balloons carry 880 kg, so a stickman is launched, a 1 m
+brick block rises, a concrete block hangs a hair the wrong side of floating, and metal
+barely notices — heavy structure needs a second round, and because balloons *accumulate*
+you can see how close a wall is to going up by counting them. Ascent is clamped to
+2.8 m/s, tuned against the camera rather than against taste: the frame sees about 10 m
+above the player and the whole joke is watching a thing go up and come back down, so an
+apex above the top of the screen throws the payoff away.
+
+Three things pop them and the player can cause all three: time (each balloon carries its
+own lifetime, biased late, so the bunch thins out and the target sinks), fire (`burning`
+is a plain field the flame sim writes, so a flamethrower brings a floating tower down),
+and blast (`popNear` is called by every explosion and every hard impact). Balloons never
+hold Rapier handles across frames — `PhysOwner.eachBody` yields nothing once an owner's
+bodies are gone, which is the signal to drop the cluster.
 
 **Game feel** (`fx/juice.ts`) is one curve, `Magnitude` (0..1), that every violent event
 is expressed on — hitstop, camera trauma/punch/kick, screen flash, slow-motion and

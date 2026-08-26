@@ -7,6 +7,7 @@ import { Callouts, type KillFacts } from "./fx/callout";
 import { Decals, anchorAt, canMark } from "./fx/decals";
 import { WaterSim } from "./fx/fluid";
 import { FireSim } from "./fx/fire";
+import { BalloonSim } from "./fx/buoyancy";
 import { SolidField } from "./fx/solids";
 import { sfx } from "./fx/audio";
 import { Background } from "./render/background";
@@ -65,6 +66,7 @@ export class Game implements GameCtx {
   readonly decals = new Decals();
   readonly water = new WaterSim();
   readonly fire = new FireSim(this);
+  readonly balloons = new BalloonSim(this);
   /**
    * One shared snapshot of nearby collision geometry, rebuilt once per physics step
    * and read by both particle sims. See `SolidField` for why it exists.
@@ -194,6 +196,7 @@ export class Game implements GameCtx {
     this.fire.clear();
     // These hold owners from the world about to be thrown away.
     this.wet.clear();
+    this.balloons.clear();
 
     // Contacts and the enemy roster must not survive into a world that no longer
     // exists — a stale sighting would have the new level's garrison walk to a spot
@@ -648,6 +651,8 @@ export class Game implements GameCtx {
 
     this.water.update(dt, this.solids, cam.x, cam.y, this.soak);
     this.fire.update(dt, this.solids, this.water, cam.x, cam.y);
+    // After fire, so a balloon that just caught light pops on the same frame.
+    this.balloons.update(dt, this.time);
     if (busy) this.solids.flush();
 
     // Soaking dries out on its own, so a doused building becomes flammable again.
@@ -1005,6 +1010,8 @@ export class Game implements GameCtx {
     // Marks sit under everything: blood is on the floor, not on the characters.
     this.decals.draw(ctx);
     for (const a of this.drawList) a.draw(ctx);
+    // Above the world it is lifting, under the particles that come off it.
+    this.balloons.draw(ctx, this.camera);
     this.particles.draw(ctx);
     this.water.draw(ctx);
     // Flames last and additive, so they light everything they are in front of.

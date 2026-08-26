@@ -35,6 +35,7 @@ export const drawNuke = propFor("nuke");
 export const drawBlackhole = propFor("blackhole");
 export const drawBarrel = propFor("barrel");
 export const drawGrenade = propFor("grenade");
+export const drawBalloonBunch = propFor("balloon");
 
 /** Ammo-wheel glyph, drawn centred in a `size`-wide box. */
 export function drawIcon(ctx: Ctx, id: string, size: number, t: number) {

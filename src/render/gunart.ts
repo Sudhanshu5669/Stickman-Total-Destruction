@@ -2,7 +2,7 @@
  * The arsenal, drawn as pixel art.
  *
  * The guns used to be assembled at runtime from rounded rectangles scaled by a `heft`
- * number, which meant nineteen rounds shared one silhouette at nineteen sizes. You could
+ * number, which meant every round shared one silhouette at twenty sizes. You could
  * not tell the chicken cannon from the nuke launcher without reading the HUD, and the
  * one object on screen the player looks at constantly was the least characterful thing
  * in the frame.
@@ -11,8 +11,8 @@
  *
  * It is authored at the pixel level — every gun below is placed in a 64x24 grid, one
  * pixel at a time — but it lives in a source file so that a palette change propagates
- * across all nineteen, and so a gun can be recoloured per-round from `AmmoDef.tint`
- * without shipping nineteen near-identical images. Rasterised once at boot into an
+ * across all of them, and so a gun can be recoloured per-round from `AmmoDef.tint`
+ * without shipping twenty near-identical images. Rasterised once at boot into an
  * offscreen canvas each, then blitted; the per-frame cost is one `drawImage`.
  *
  * If hand-drawn sprites arrive later, `sprite()` is the only thing that has to change:
@@ -33,6 +33,7 @@
 
 import type { Ctx } from "./draw";
 import { ART_PPM, INK, Px, RAMPS, shadeHex, type RampName } from "./pixel";
+import { paintBalloon, partyRamp } from "./balloonart";
 
 /** Source pixels per world metre. A 48-pixel gun is 1.5 m long. */
 export const GUN_PPM = ART_PPM;
@@ -86,7 +87,7 @@ function bolt(p: Px, x: number, y: number) {
   p.set(x, y + 1, RAMPS.steel[0]);
 }
 
-/** The band every barrel ends in, so all nineteen agree on what a muzzle looks like. */
+/** The band every barrel ends in, so the whole arsenal agrees what a muzzle looks like. */
 function muzzleRing(p: Px, x: number, y: number, h: number) {
   p.col(x, y, h, RAMPS.steel[2]);
   p.col(x + 1, y, h, RAMPS.steel[0]);
@@ -101,7 +102,7 @@ function accentPatch(p: Px, x: number, y: number, w: number, h: number, tint: st
 type Draw = (p: Px, tint: string) => void;
 
 /**
- * The nineteen. Each is a silhouette first — see rule 1 — and the comment on each says
+ * The arsenal. Each is a silhouette first — see rule 1 — and the comment on each says
  * what shape it is trying to be, because that is the part that has to survive being
  * forty pixels wide.
  */
@@ -363,6 +364,44 @@ const GUNS: Record<string, Draw> = {
     // Pilot flame.
     p.rect(56, MID - 3, 2, 6, tint);
     p.rect(58, MID - 1, 2, 2, "#fff2c2");
+  },
+
+  /**
+   * A bell-mouthed mortar with a helium tank sitting on its back.
+   *
+   * Two features and nothing else, because the version before this one had five and
+   * read as a grey ruler. The tank on top is the silhouette — no other gun in the
+   * arsenal has anything above the barrel line — and the bell is the promise: a mouth
+   * that wide is obviously not firing a bullet.
+   *
+   * Rule 7 is taken literally here. Every other gun wears a patch of its round's tint;
+   * this one cannot, because its round is five colours at once, so the payload itself
+   * sits in the mouth instead.
+   */
+  balloon: (p, tint) => {
+    // Helium tank, valve forward, strapped over the receiver.
+    p.tube(10, MID - 11, 21, 8, "steel", 2);
+    p.col(10, MID - 11, 8, RAMPS.steel[2]);
+    p.col(30, MID - 11, 8, RAMPS.steel[0]);
+    accentPatch(p, 15, MID - 8, 9, 3, tint);
+    p.rect(31, MID - 9, 3, 4, RAMPS.brass[1]);    // valve block
+    p.row(31, MID - 9, 3, RAMPS.brass[2]);
+    p.rect(26, MID - 12, 2, 2, RAMPS.brass[1]);   // pressure gauge
+    // Feed line down into the breech, so the tank is plumbed rather than taped on.
+    p.stroke(33, MID - 6, 36, MID - 2, RAMPS.gunmetal[1], 2);
+
+    stock(p, 2, 9);
+    grip(p, 19);
+    p.tube(8, MID - 4, 30, 9, "gunmetal");
+    bolt(p, 12, MID - 2);
+    bolt(p, 34, MID - 2);
+
+    // The bell. Flares hard over twelve pixels — a gentle taper reads as a blunderbuss,
+    // a hard one reads as a thing that lobs something soft.
+    p.cone(38, MID, 13, 11, 20, RAMPS.steel, 1);
+    muzzleRing(p, 51, MID - 10, 20);
+    // One balloon, filling the mouth and just clearing the rim.
+    paintBalloon(p, 47, MID - 9, 5, 14, partyRamp(0));
   },
 
   /** A stubby tube with a fat round payload sitting in it. */

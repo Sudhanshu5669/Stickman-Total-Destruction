@@ -1,7 +1,7 @@
 /**
  * The ammunition, drawn as pixel art.
  *
- * System 6 rebuilt the nineteen guns as pixel art and stopped there, which left the
+ * System 6 rebuilt the guns as pixel art and stopped there, which left the
  * game firing smooth vector cars out of chunky pixel cannons. At rest that is a small
  * inconsistency; in motion it is the loudest thing on screen, because the payload is
  * the object the camera follows. A pixel gun that spits an anti-aliased jetliner reads
@@ -14,8 +14,9 @@
  *
  * ## What is here and what is not
  *
- * The fourteen *rigid* payloads: rocket, car, jetliner, anvil, piano, fridge, bowling
- * ball, watermelon, sawblade, television, nuke, singularity, barrel, grenade. Plus five
+ * The fifteen *rigid* payloads: rocket, car, jetliner, anvil, piano, fridge, bowling
+ * ball, watermelon, sawblade, television, nuke, singularity, barrel, grenade, balloons.
+ * Plus five
  * icon-only glyphs for the rounds that have no rigid body of their own — the three
  * creature rounds and the two continuous ones — so the ammo wheel is one art set with
  * no vector holdouts in it.
@@ -38,6 +39,7 @@ import type { Ctx } from "./draw";
 import {
   ART_PPM, INK, Px, RAMPS, blitPixels, ramp, shadeHex, type Ramp3,
 } from "./pixel";
+import { paintBalloon, partyRamp } from "./balloonart";
 
 const TAU = Math.PI * 2;
 
@@ -523,7 +525,7 @@ const ART: Record<string, AmmoArt> = {
   // ---------------------------------------------------------------------------
   // Icon-only glyphs. The creature rounds are ragdolls in the world (see the file
   // header) and the two continuous rounds have no body at all, but the ammo wheel
-  // still has to show all nineteen in one style.
+  // still has to show every round in one style.
   // ---------------------------------------------------------------------------
 
   chicken: {
@@ -605,6 +607,64 @@ const ART: Record<string, AmmoArt> = {
       p.ball(25, 6, 2.6, ramp(C.water, -0.35, 0.5));   // spray
       p.ball(27, 13, 1.8, ramp(C.water, -0.35, 0.5));
       p.ball(20, 2, 1.5, ramp(C.water, -0.35, 0.5));
+    },
+  },
+
+  /**
+   * A bunch of five on a steel clamp, authored pointing *right*.
+   *
+   * The round carries `steer`, so the body turns to face its own velocity and the
+   * clamp leads while the balloons stream out behind it. That is the whole reason this
+   * is a horizontal sprite rather than the vertical bunch you would draw first: a
+   * bouquet flying sideways looks like a mistake, a bunch being dragged by its weight
+   * looks like it is going somewhere.
+   *
+   * The balloons themselves come from `render/balloonart.ts`, which is also what the
+   * buoyancy sim draws once they have been tied to something — so the fistful you fire
+   * and the balloons you end up looking at are the same shape at the same pixel size.
+   */
+  balloon: {
+    grid: [48, 40], origin: [40, 20], bodyW: 13, frames: 6, fps: 9,
+    draw: (p, f) => {
+      const CX = 38, CY = 20;
+      const bunch = [
+        { x: 11, y: 3, rx: 7, h: 18, c: 0 },
+        { x: 24, y: 1, rx: 6, h: 15, c: 1 },
+        { x: 6, y: 18, rx: 6.5, h: 17, c: 2 },
+        { x: 19, y: 17, rx: 7, h: 18, c: 3 },
+        { x: 29, y: 12, rx: 5.5, h: 14, c: 4 },
+      ];
+      // Each balloon jostles on its own phase. In step they read as one object on a
+      // spring; out of step they read as five things tied together, which is the point.
+      const wob = bunch.map((_, i) => {
+        const a = (f / 6) * TAU + i * 1.27;
+        return { dx: Math.round(Math.sin(a) * 1.2), dy: Math.round(Math.cos(a * 0.8) * 1.4) };
+      });
+
+      // Strings first: the balloons paint over their own knots, so a string can never
+      // be seen crossing the latex it is tied to.
+      for (let i = 0; i < bunch.length; i++) {
+        const b = bunch[i];
+        const kx = b.x + wob[i].dx, ky = b.y + b.h + wob[i].dy;
+        const mx = (kx + CX) / 2, my = (ky + CY) / 2 + 2.5;
+        p.stroke(kx, ky, mx, my, INK);
+        p.stroke(mx, my, CX - 4, CY, INK);
+      }
+
+      for (let i = 0; i < bunch.length; i++) {
+        const b = bunch[i];
+        paintBalloon(p, b.x + wob[i].dx, b.y + wob[i].dy, b.rx, b.h, partyRamp(b.c));
+      }
+
+      // The clamp. Blunt, heavy and obviously metal — it is the half of this round that
+      // has to survive hitting a wall, and at thirteen pixels the contrast against five
+      // soft shapes is what makes the silhouette readable at all.
+      p.tube(CX - 7, CY - 3, 11, 7, "steel");
+      p.cone(CX + 4, CY, 5, 7, 3, RAMPS.gunmetal, 1);
+      p.rect(CX - 2, CY - 5, 3, 3, RAMPS.brass[1]);
+      p.set(CX - 2, CY - 5, RAMPS.brass[2]);
+      rivet(p, CX - 5, CY - 1);
+      rivet(p, CX + 1, CY - 1);
     },
   },
 

@@ -214,6 +214,36 @@ export const AMMO: AmmoDef[] = [
       impactSound: "glass", draw: P.drawFridge, points: 130,
     })),
   },
+  /**
+   * The only round in the arsenal that makes the level *lighter*.
+   *
+   * Deliberately weak on contact — 19 kg of latex does no damage worth the name — and
+   * priced instead on what happens afterwards, which is not scored here at all: the
+   * blocks it floats do their own scoring when they come down. Balloons stack on a
+   * target that is already carrying some, so a concrete wall too heavy for one bunch
+   * goes up on the second, and you can see how close it is by counting them. The
+   * numbers behind that curve are in `fx/buoyancy.ts`.
+   *
+   * `steer` is not decoration: the sprite is a bunch being dragged by a clamp and it is
+   * authored pointing right, so the body has to face its own velocity or the round
+   * flies sideways through the level like a thrown bouquet.
+   */
+  {
+    id: "balloon",
+    name: "Party Supplies",
+    tagline: "Ties balloons to it. Gravity takes the afternoon off.",
+    tint: "#f0508a",
+    count: 1, spread: 0.05, speed: 34, speedVar: 2, cooldown: 0.55,
+    recoil: 4, heft: 0.4, auto: true, reserve: -1, muzzle: 1.2,
+    spawn: makeRigid(rigid({
+      shape: "ball", w: 0.4, h: 0.4, density: 120,
+      // Drag, not weight: a bunch of balloons should visibly lose its throw rather
+      // than arcing like a stone, so the round has a real range you have to respect.
+      gravityScale: 0.5, linearDamping: 0.28, restitution: 0.05, steer: 6,
+      buoy: { balloons: 4, radius: 2.4, duration: 6 },
+      impactSound: "thud", draw: P.drawBalloonBunch, points: 90, life: 9,
+    })),
+  },
   {
     id: "bowling",
     name: "Perfect Game",

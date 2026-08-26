@@ -11,7 +11,10 @@ import type { GameCtx } from "../core/types";
  * of assuming everything is available.
  */
 const SHOWCASE = [
-  "rocket", "car", "elephant", "piano", "plane", "sawblade", "barrel",
+  // `balloon` sits high on purpose. It is the one round whose effect keeps developing
+  // for six seconds after the shot, which is exactly the shape a menu backdrop wants —
+  // the other favourites are over in a second and a half.
+  "rocket", "car", "balloon", "elephant", "piano", "plane", "sawblade", "barrel",
   "stickman", "chicken", "watermelon", "anvil", "tv", "bowling",
 ];
 

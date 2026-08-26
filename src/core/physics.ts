@@ -53,6 +53,16 @@ export interface PhysOwner {
    * strength destroys it. Fired by the fridge round.
    */
   freeze?(): void;
+  /**
+   * Visits every rigid body this owner currently has in the world.
+   *
+   * A visitor rather than a `bodies()` getter because the caller is `fx/buoyancy.ts`,
+   * which asks once per cluster per step and would otherwise allocate an array per
+   * ragdoll per frame. It is also the safe shape: an owner whose bodies have already
+   * been removed simply yields nothing, so a long-lived effect can never be left
+   * holding a freed handle. Nothing may hold the bodies past the call.
+   */
+  eachBody?(fn: (body: RAPIER.RigidBody) => void): void;
 
   // ------------------------------------------------------------- heat and water
   //

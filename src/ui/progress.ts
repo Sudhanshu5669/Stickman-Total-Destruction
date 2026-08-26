@@ -66,7 +66,7 @@ function write(key: string, value: number) {
 /**
  * The arsenal: round id, and the lifetime carnage that buys it.
  *
- * **Every round costs nothing.** The whole nineteen-round arsenal is in your hands the
+ * **Every round costs nothing.** The whole twenty-round arsenal is in your hands the
  * first time the game opens, on a fresh save, with no ladder to climb.
  *
  * This is a sandbox, and a sandbox that withholds its toys is just a shorter sandbox.
@@ -98,6 +98,7 @@ export const ARSENAL: readonly (readonly [string, number])[] = [
   ["sawblade", 0],     // ricochets and cuts
   ["water", 0],        // a real fluid sim
   ["fridge", 0],       // freeze, a mechanic rather than a bigger boom
+  ["balloon", 0],      // buoyancy — the one round that makes the level lighter
   ["piano", 0],        // crushing weight, and the chord
   ["flamethrower", 0], // the fire sim, which burns on without you
   ["car", 0],          // two tonnes that ploughs through, then detonates
@@ -215,7 +216,7 @@ export const progress = {
   /**
    * Pays a one-off bounty the first time each round is ever fired.
    *
-   * Eighteen rounds is only an arsenal if the player tries them. Left alone, most
+   * Twenty rounds is only an arsenal if the player tries them. Left alone, most
    * players find three they like in the first minute and never press `4` again, which
    * quietly deletes two thirds of the game — so curiosity gets paid for, once per
    * round, for as long as the save lives.

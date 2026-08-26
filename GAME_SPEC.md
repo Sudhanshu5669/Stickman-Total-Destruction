@@ -68,7 +68,7 @@ a real OFF — and `M` still mutes. Both persist.
 Full small game, being **rebuilt**, not extended. The previous build's retention
 machinery (medals, daily streak, best-run bonus, leaderboard placing, coach prompts tied
 to missions) is cut. What survives is the physics, the ragdoll, and the arsenal — all
-nineteen rounds of it, unlocked from the start.
+twenty rounds of it, unlocked from the start.
 
 ## Genre-specific answers
 
@@ -106,5 +106,13 @@ nineteen rounds of it, unlocked from the start.
 - No physics engine swap (Rapier stays).
 - No story, no cutscenes, no narrator, no mission briefings. `ui/story.ts` is deleted.
 - No audio, until the user decides what audio should be.
-- No new ammo types. Nineteen is plenty; the problem was never a content shortage.
+- ~~No new ammo types. Nineteen is plenty; the problem was never a content shortage.~~
+  **Amended 2026-08-26.** The diagnosis was right and the conclusion was wrong: the
+  shortage was never *content*, it was **verbs**. Nineteen rounds shared about eleven
+  physical behaviours, and the file said so itself — `tv`'s own comment called it "the
+  one genuinely redundant round in the arsenal… with no verb of its own", and the fix was
+  giving it a job nothing else did. So the bar for a new round is not "is it funny", it
+  is **does it claim a verb the engine can already do that nothing else owns**. Party
+  Supplies claims buoyancy. A round that is a re-skin of an existing verb still fails
+  this test, and the original ban applies to it in full.
 - No near-miss or rigged-failure mechanics.

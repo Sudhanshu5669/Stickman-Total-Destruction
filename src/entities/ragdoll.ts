@@ -343,6 +343,18 @@ export class Ragdoll implements PhysOwner {
     this.goLimp();
   }
 
+  /**
+   * Every bone, and none at all once the skeleton has been disposed.
+   *
+   * Guarded on `disposed` rather than on `dead`, and the difference is load-bearing: a
+   * dead stickman is still a pile of live bodies on the floor, and balloons tied to one
+   * should keep lifting it. Only disposal actually removes the bodies.
+   */
+  eachBody(fn: (body: RAPIER.RigidBody) => void) {
+    if (this.disposed) return;
+    for (const b of this.boneList) fn(b.body);
+  }
+
   /** Re-enables motor control after a limp period (used by the player's get-up). */
   stiffen() {
     if (this.frozen) return;
