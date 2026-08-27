@@ -113,6 +113,8 @@ twenty rounds of it, unlocked from the start.
   one genuinely redundant round in the arsenal… with no verb of its own", and the fix was
   giving it a job nothing else did. So the bar for a new round is not "is it funny", it
   is **does it claim a verb the engine can already do that nothing else owns**. Party
-  Supplies claims buoyancy. A round that is a re-skin of an existing verb still fails
-  this test, and the original ban applies to it in full.
+  Supplies claims buoyancy; the Tow Cable claims *pull* — a directed winch onto one
+  body you aim, as opposed to the black hole's radial drag-everything-then-let-go. A
+  round that is a re-skin of an existing verb still fails this test, and the original ban
+  applies to it in full.
 - No near-miss or rigged-failure mechanics.

@@ -21,6 +21,7 @@ Status: `pending` · `building` · `testing` · `done`
 | 12 | **Character pass** — the front end, and arenas that look like places | **done** | PASS 2026-08-23 — see below |
 | 13 | **Perf pass** — frame budget on the slow-PC floor | pending | Holds 60 on High mid-range, holds 60 on Low with the budget throttled |
 | 14 | **Party Supplies** — the buoyancy round | **done** | PASS 2026-08-26 — see below |
+| 15 | **Tow Cable** — the pull round (harpoon + winch) | **done** | PASS 2026-08-27 — see below |
 
 ## System 12 — the character pass
 
@@ -187,6 +188,74 @@ on the way up. 60 fps with 48 balloons live and 390 bodies; zero console errors 
 run. `tsc` and `vite build` clean.
 
 **Not yet judged at full speed by a human.**
+
+## System 15 — Tow Cable
+
+The second round since the Sandbox Reset, and it clears the amended non-goal's bar the
+same way Party Supplies did: it claims a verb — **pull** — that nothing else owns. The
+black hole drags everything within a radius toward a point for a few seconds and then
+lets go; the Tow Cable is a directed line onto *one* body that you aim, and it holds.
+
+**What it is.** A barbed harpoon on a winch. The head buries in the first thing it
+touches; the winch then hauls that thing back toward your hand for 0.7 s.
+
+**The one decision that is the whole round: the winch pulls against real mass.**
+`fx/tow.ts` applies `REEL_FORCE / mass` capped at `REEL_ACCEL_CAP`, per body, and the
+*shortfall* — how much of the cap the target failed to use — is what decides how hard
+the line yanks you the other way. So:
+
+- a stickman, a chair, a loose crate — light, the winch wins, they come at you
+  head-first and flailing;
+- a car, a concrete slab, a laden pillar — too heavy to reel, so the reaction wins and
+  you are dragged off your feet into the building;
+- a wall — nothing to reel, pure reaction, which is a grappling zip and the only way to
+  cross a Drift chasm under your own power.
+
+**Built to the Party Supplies template.** New sim in `fx/`, wired into `GameCtx` /
+`Game` exactly as `balloons` is (`clear` on world rebuild, `update` after the balloon
+step, `draw` after the balloon draw). It never holds a Rapier handle across frames:
+every step it re-resolves the anchor body through `PhysOwner.eachBody`, and an owner
+that yields nothing (reeled a stickman into a wall hard enough to gib him) is the signal
+to cut the line. The winch is a force loop, not a joint — Rapier joint creation isn't
+even wrapped in `core/physics`, and everything jointed in this game is a ragdoll built
+once. `Game` gains `towOrigin()` (the hand) and `towReact()` (a velocity change onto the
+player ragdoll) as the cable's two ends.
+
+**Not the harpoon's job:** anchored blocks are `disturb()`-ed on the bite so the winch
+has a free body to pull, closing speed on a reeled body is capped so a chair does not
+arrive as a bullet, and the cable snaps past `SNAP_STRETCH` so a runaway target does not
+tow the whole level.
+
+**Three bugs found and fixed while testing, all by instrumenting rather than reasoning.**
+
+1. **The harpoon shattered its own anchor.** At 240 kg/m³ it carried ~88 kJ and one-shot
+   whatever it hit, so `hook()` kept getting a dead owner and fell through to the
+   static-world branch — a grapple onto a hole where a wall used to be. Dropped to
+   ~5 kg (density 26); it now chips glass and nothing else.
+2. **The bite never fired.** `onImpact` gated the hook on impact energy, but a 5 kg body
+   into a wall is fully arrested by the solver *before* the collision event is drained,
+   so the energy read back as 58 J. Since `onImpact` only fires on a real started
+   contact above the 2.2 m/s floor anyway, the gate was removed: a harpoon that has
+   touched anything has arrived.
+3. **`resist` was assumed, not measured.** A one-metre block wedged under four courses
+   of wall has a small mass, so `REEL_FORCE / mass` said "reels freely" and the shooter
+   felt almost nothing while the block went nowhere. Added a *stall* reading — how far
+   short of the target the gap is actually closing — and `resist` is now the larger of
+   the two. A body that won't come, for any reason, pulls you off your feet (`Player
+   .yankOffFeet`, a one-off knockdown so `locomotion` stops braking the pull).
+
+**Verified in a real browser** (Playwright, `index.html`; the shot harness pins the
+camera and lies about framing, and this repo has been caught by that before). Telemetry
+across a dozen runs in the Proving Ground: a hooked enemy ragdoll reels ~5 m toward the
+shooter with its bones hitting 14 m/s; a wall block wedged in a stack does not come, and
+the shooter is instead hauled 1.9–2.8 m into the wall and knocked limp; the cable and a
+buried head draw from muzzle to anchor and track the anchor bone every step; switching
+arena mid-reel clears the sim (`tow.count → 0`); `tsc` and `vite build` clean; **zero
+console errors** in every run.
+
+**Not yet judged at full speed by a human** — in particular the grapple-zip strength on
+solid terrain (the "cross a Drift chasm under your own power" use) and the feel of the
+0.85 s reel window.
 
 ## Notes
 

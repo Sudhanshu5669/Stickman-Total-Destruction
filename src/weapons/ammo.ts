@@ -58,6 +58,18 @@ const makeCreature = (cfg: CreatureConfig) =>
     new CreatureProjectile(game, cfg, pos, dir, facing);
 
 /**
+ * Like `makeRigid`, but also hands the fresh projectile to the tow sim so a rope draws
+ * from the barrel while the harpoon is still in the air. `cfg.tether` is the single
+ * source of truth for the winch — `onImpact` reads it too.
+ */
+const makeHarpoon = (cfg: ProjectileConfig) =>
+  (game: GameCtx, pos: V, dir: V): Actor => {
+    const p = new RigidProjectile(game, cfg, pos, dir, Math.atan2(dir.y, dir.x));
+    game.tow.launch(p, cfg.tether!);
+    return p;
+  };
+
+/**
  * The arsenal. Every entry is pure data plus a spawn closure, so adding a new
  * ridiculous round is a single object literal — no new classes, no new systems.
  *
@@ -242,6 +254,44 @@ export const AMMO: AmmoDef[] = [
       gravityScale: 0.5, linearDamping: 0.28, restitution: 0.05, steer: 6,
       buoy: { balloons: 4, radius: 2.4, duration: 6 },
       impactSound: "thud", draw: P.drawBalloonBunch, points: 90, life: 9,
+    })),
+  },
+  /**
+   * The one round that *pulls*. Deliberately weak on contact — the barbed head is 24 kg
+   * of steel and does almost nothing to a wall — and priced on the aftermath, which is
+   * not scored here: whatever the winch drags into whatever else does its own scoring
+   * on the way through.
+   *
+   * The verb lives in `fx/tow.ts`. The head buries in the first thing it touches and a
+   * winch hauls that thing toward you, pulling against real mass — so a stickman or a
+   * crate arrives head-first, a loaded pillar barely moves and the reaction drags *you*
+   * into the building, and a wall is a pure grappling zip across a gap. Nothing else in
+   * the arsenal claims "pull": the black hole drags everything radially for a few
+   * seconds and lets go; this is a directed line onto one body that you aim.
+   *
+   * `steer` is high because a harpoon that tumbles is a harpoon that lands flat and
+   * skips. `restitution` is zero for the same reason — it has to bite, not bounce.
+   */
+  {
+    id: "harpoon",
+    name: "Tow Cable",
+    tagline: "Reels in whatever it sticks. Or reels you in.",
+    tint: "#6c7a86",
+    count: 1, spread: 0.01, speed: 58, speedVar: 0, cooldown: 1.15,
+    recoil: 6, heft: 0.5, auto: false, reserve: -1, muzzle: 1.3,
+    spawn: makeHarpoon(rigid({
+      // ~5 kg. Deliberately far too light to break what it hits — a harpoon that
+      // shatters its own anchor is a harpoon with nothing to reel. Low gravity so the
+      // line stays a near-flat aimed shot out to its useful range rather than an arc.
+      shape: "box", w: 1.2, h: 0.16, density: 26,
+      gravityScale: 0.12, steer: 10, linearDamping: 0.01,
+      angularDamping: 0.5, restitution: 0, friction: 0.9,
+      // Just over the enemy stagger threshold (12): a harpooned stickman drops into a
+      // full ragdoll and is reeled in as dead weight, flailing, rather than moonwalking
+      // toward you bolt upright. Nowhere near lethal, and trivial against masonry.
+      tether: { duration: 0.85, reactScale: 1 },
+      bonusDamage: 14, impactSound: "metal",
+      draw: P.drawHarpoon, points: 90, life: 4,
     })),
   },
   {

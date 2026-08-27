@@ -99,6 +99,7 @@ export const ARSENAL: readonly (readonly [string, number])[] = [
   ["water", 0],        // a real fluid sim
   ["fridge", 0],       // freeze, a mechanic rather than a bigger boom
   ["balloon", 0],      // buoyancy — the one round that makes the level lighter
+  ["harpoon", 0],      // pull — a directed winch onto one body
   ["piano", 0],        // crushing weight, and the chord
   ["flamethrower", 0], // the fire sim, which burns on without you
   ["car", 0],          // two tonnes that ploughs through, then detonates

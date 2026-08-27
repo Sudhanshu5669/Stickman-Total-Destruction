@@ -60,6 +60,14 @@ export interface ProjectileConfig {
    * wall too heavy for one round goes up on the second. See `fx/buoyancy.ts`.
    */
   buoy?: { balloons: number; radius: number; duration: number };
+  /**
+   * Fires a tethered harpoon. The barbed head buries itself in the first thing it
+   * touches and a winch hauls that thing back toward the shooter — but the winch pulls
+   * against real mass, so a crate flies to you and a laden pillar drags *you* into the
+   * building instead. A terrain hit is a pure grappling zip. The one round that owns
+   * "pull". See `fx/tow.ts`.
+   */
+  tether?: { duration: number; reactScale: number };
   /** Flat extra damage applied to whatever it touches, on top of kinetic damage. */
   bonusDamage: number;
   impactSound: ImpactSound;
@@ -257,6 +265,19 @@ export class RigidProjectile implements Actor, PhysOwner {
     if (this.soundCd <= 0 && kj > 0.4) {
       this.soundCd = 0.06;
       this.playImpactSound(clamp(kj / 40, 0.15, 1));
+    }
+
+    // The harpoon bites on the first thing it touches, hands the anchor to the winch,
+    // and is gone — the cable and the buried head are the tow sim's to draw from here.
+    // No energy gate: `onImpact` only fires on a real started contact above the 2.2 m/s
+    // floor, and a harpoon that has touched anything at all has arrived. The round is
+    // built too light to register much impact energy anyway — that lightness is on
+    // purpose, so it never shatters the thing it means to reel. Paid on the bite.
+    if (c.tether) {
+      this.game.tow.hook(this, other, point);
+      this.payOut(point);
+      this.dead = true;
+      return;
     }
 
     if (c.freeze) this.freezeAround(point, other);

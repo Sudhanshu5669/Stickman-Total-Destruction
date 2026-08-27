@@ -669,6 +669,30 @@ const ART: Record<string, AmmoArt> = {
   },
 
   /**
+   * A barbed head on a shaft, authored pointing *right* — the round carries `steer`, so
+   * the body faces its own velocity and the head always leads. The rope eye at the tail
+   * is where `fx/tow.ts` pins its cable while the harpoon is in the air; once it bites,
+   * the sim draws a fresh head buried in the target and this sprite is gone.
+   */
+  harpoon: {
+    grid: [46, 16], origin: [23, 8], bodyW: 38,
+    draw: (p) => {
+      const s = RAMPS.steel;
+      p.tube(7, 7, 27, 3, "steel");                 // shaft
+      p.col(31, 4, 8, RAMPS.gunmetal[1]);           // ferrule
+      p.set(31, 4, RAMPS.gunmetal[2]);
+      p.tri(45, 8, 33, 2, 33, 14, s[1]);            // head
+      p.tri(43, 8, 35, 5, 35, 11, s[2]);            // lit inner face
+      p.tri(37, 4, 30, 0, 36, 8, s[0]);             // upper barb, kicked back
+      p.tri(37, 12, 30, 16, 36, 8, s[0]);           // lower barb
+      p.arc(5, 8, 3, -3.14, 3.14, 1.4, RAMPS.brass[1]); // rope eye
+      p.set(6, 8, RAMPS.brass[2]);
+      rivet(p, 14, 7);
+      rivet(p, 24, 7);
+    },
+  },
+
+  /**
    * Made of light, so it gets no ink at all — the HUD's own rim carries it instead.
    *
    * Built as nested tongues off one silhouette curve: blunt at the nozzle, fattest a

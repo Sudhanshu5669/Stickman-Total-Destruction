@@ -417,6 +417,26 @@ const GUNS: Record<string, Draw> = {
     p.row(36, MID - 4, 8, tint);
     p.rect(39, MID - 7, 2, 3, RAMPS.brass[2]);
   },
+
+  /** A speargun slung under a winch drum — the only gun in the set that reels. */
+  harpoon: (p, tint) => {
+    stock(p, 3, 10);
+    grip(p, 16);
+    p.tube(12, MID - 3, 26, 7, "steel");
+    accentPatch(p, 17, MID - 1, 6, 3, tint);
+    // Winch drum under the receiver, wound with line.
+    p.disc(21, MID + 7, 4, RAMPS.gunmetal[1]);
+    p.disc(21, MID + 7, 2, RAMPS.steel[0]);
+    p.set(20, MID + 6, RAMPS.steel[2]);
+    // Launch rail with the shaft riding it, then the barbed head past the muzzle.
+    p.tube(34, MID - 1, 20, 3, "gunmetal");
+    p.col(37, MID - 4, 3, RAMPS.steel[2]);
+    p.row(40, MID, 16, RAMPS.steel[2]);
+    muzzleRing(p, 50, MID - 4, 9);
+    p.tri(61, MID, 55, MID - 4, 55, MID + 4, RAMPS.steel[1]);
+    p.tri(57, MID - 3, 53, MID - 6, 56, MID, RAMPS.steel[0]);
+    p.tri(57, MID + 3, 53, MID + 6, 56, MID, RAMPS.steel[0]);
+  },
 };
 
 /** Rasterised guns, keyed by `${ammoId}`. Built on first use, never rebuilt. */

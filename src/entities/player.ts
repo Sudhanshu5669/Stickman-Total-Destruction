@@ -352,6 +352,17 @@ export class Player implements Actor {
     this.ragdoll.goLimp();
   }
 
+  /**
+   * The tow cable hooked something that will not come to you, so you go to it. Only
+   * fires while you are actually standing — once you are off your feet the sustained
+   * pull from `fx/tow.ts` does the rest, and `locomotion` is no longer braking it.
+   */
+  yankOffFeet() {
+    if (this.ragdoll.dead || this.ragdoll.limp || !this.grounded) return;
+    this.knockdown(0.5);
+    this.launchBoost = Math.max(this.launchBoost, 0.5);
+  }
+
   toggleRagdoll() {
     if (this.ragdoll.dead) return;
     this.manualRagdoll = !this.manualRagdoll;

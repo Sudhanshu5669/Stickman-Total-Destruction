@@ -6,6 +6,7 @@ import type { KillFacts } from "../fx/callout";
 import type { WaterSim } from "../fx/fluid";
 import type { FireSim } from "../fx/fire";
 import type { BalloonSim } from "../fx/buoyancy";
+import type { TowSim } from "../fx/tow";
 import type { Ctx } from "../render/draw";
 import type { Theme } from "../render/theme";
 import type { V } from "./math";
@@ -60,6 +61,8 @@ export interface GameCtx {
   readonly fire: FireSim;
   /** Everything currently hanging from balloons. Fed by the Party Supplies round. */
   readonly balloons: BalloonSim;
+  /** Harpoon cables currently reeling something in. Fed by the Tow Cable round. */
+  readonly tow: TowSim;
   readonly camera: Camera;
   /** Palette of the world currently loaded. */
   readonly theme: Theme;

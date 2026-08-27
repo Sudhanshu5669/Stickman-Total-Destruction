@@ -8,6 +8,7 @@ import { Decals, anchorAt, canMark } from "./fx/decals";
 import { WaterSim } from "./fx/fluid";
 import { FireSim } from "./fx/fire";
 import { BalloonSim } from "./fx/buoyancy";
+import { TowSim } from "./fx/tow";
 import { SolidField } from "./fx/solids";
 import { sfx } from "./fx/audio";
 import { Background } from "./render/background";
@@ -67,6 +68,7 @@ export class Game implements GameCtx {
   readonly water = new WaterSim();
   readonly fire = new FireSim(this);
   readonly balloons = new BalloonSim(this);
+  readonly tow = new TowSim(this);
   /**
    * One shared snapshot of nearby collision geometry, rebuilt once per physics step
    * and read by both particle sims. See `SolidField` for why it exists.
@@ -197,6 +199,7 @@ export class Game implements GameCtx {
     // These hold owners from the world about to be thrown away.
     this.wet.clear();
     this.balloons.clear();
+    this.tow.clear();
 
     // Contacts and the enemy roster must not survive into a world that no longer
     // exists — a stale sighting would have the new level's garrison walk to a spot
@@ -464,6 +467,19 @@ export class Game implements GameCtx {
     };
   }
 
+  /** The shooter's hand, for the tow cable to reel toward. Null when there is no player. */
+  towOrigin(): V | null {
+    if (this.mode !== "playing" || !this.player || this.player.isDown) return null;
+    return this.player.hand;
+  }
+
+  /** The cable's pull on the shooter — a velocity change straight onto the ragdoll. */
+  towReact(dv: V, hard: boolean) {
+    if (this.mode !== "playing" || !this.player) return;
+    if (hard) this.player.yankOffFeet();
+    this.player.ragdoll.applyImpulse(dv);
+  }
+
   reportKill(facts: KillFacts) {
     this.callouts.kill(facts);
   }
@@ -653,6 +669,9 @@ export class Game implements GameCtx {
     this.fire.update(dt, this.solids, this.water, cam.x, cam.y);
     // After fire, so a balloon that just caught light pops on the same frame.
     this.balloons.update(dt, this.time);
+    // After balloons: a floated body is fair game for the winch, and the winch reads
+    // the hand position the same frame the player's aim was resolved.
+    this.tow.update(dt);
     if (busy) this.solids.flush();
 
     // Soaking dries out on its own, so a doused building becomes flammable again.
@@ -1012,6 +1031,7 @@ export class Game implements GameCtx {
     for (const a of this.drawList) a.draw(ctx);
     // Above the world it is lifting, under the particles that come off it.
     this.balloons.draw(ctx, this.camera);
+    this.tow.draw(ctx);
     this.particles.draw(ctx);
     this.water.draw(ctx);
     // Flames last and additive, so they light everything they are in front of.
