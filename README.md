@@ -1,67 +1,51 @@
 # Stickman Total Destruction
 
 A 2D ragdoll destruction sandbox. You are a stickman with a gun that fires things a gun
-should not be able to fire — chickens, sedans, grand pianos, passenger jets, live
-elephants, other stickmen — at buildings full of stickmen, and everything is simulated.
+has no business firing — chickens, sedans, grand pianos, passenger jets, live elephants,
+other stickmen — at buildings full of stickmen, and everything is simulated.
 
 Nothing in this game is animated. Every collapse, every flop, every tumbling wreck is
 solved by the physics engine at runtime.
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
-npm run build    # -> dist/, ready to zip and upload
+npm run dev        # http://localhost:5173
+npm run build      # tsc --noEmit && vite build  ->  dist/, ready to zip and upload
+npm run preview    # serve the built dist/ locally
+npm run typecheck  # tsc --noEmit on its own
 ```
 
-## Modes
+## The loop
 
-The start menu opens on three modes. Whatever is selected plays itself behind the menu,
-driven by the same character and physics you're about to control.
+Pick an arena. Break it. Watch the physics engine solve the consequences. Go again.
 
-### Playground
+There is **one mode** — an arena picker — and that is the whole structure. No story, no
+missions, no lives, no win screen, nothing to read. The previous build's campaign,
+contracts, endless and daily modes were torn out on purpose (the "Sandbox Reset"; see
+`GAME_SPEC.md`, which is the source of truth for design).
 
-Free play. All four worlds, the whole arsenal, nothing shooting back — the original
-sandbox.
+Whatever arena is selected in the menu plays itself behind the menu, driven by the same
+character and physics you are about to control — the preview *is* the thumbnail.
 
-| World | Twist |
-| --- | --- |
-| **Test Range** | Daylight sandbox. Crates, houses and a skyline. Learn the arsenal here. |
-| **Blackthorn Keep** | Night siege. Curtain walls, gatehouse, crenellated towers and a keep. Stone shrugs off the light rounds. |
-| **Xenoform Basin** | Hive world under corrosive rain. Anything with open sky above it takes damage — including you. Roofs are real cover. |
-| **Ares Colony** | Mars at roughly a third gravity. You jump ~4.6m instead of ~1.7m, and every round carries about three times as far. |
+## The seven arenas
 
-### Campaign
+Deliberately not seven corridors — each is a different shape of fight, and none of them
+can be read from the spawn or finished from one firing position (300–420 m each).
 
-Six missions, unlocked in order and remembered in `localStorage`. Clear every hostile on
-the map. The rules are different here and they are enforced by the game, not by good
-manners:
-
-- **They shoot back.** See *Enemy AI* below.
-- **Fixed loadout.** Each mission issues a handful of rounds chosen for it — mission 1 has
-  four, the last has seven including the nuke and the black hole.
-- **Limited lives**, three down to one on the last mission. Run out and the mission fails.
-- **No god mode.** `G` refuses, out loud.
-
-| # | Mission | The problem |
+| Arena | Shape | Twist |
 | --- | --- | --- |
-| 1 | **Wake-Up Call** | A lumber outpost with short-range SMGs and bad aim. |
-| 2 | **Night Watch** | Wall gunners with rifles and a clear field of fire. |
-| 3 | **Downtown Problem** | Snipers on the skybridge, shotguns in the lobby. |
-| 4 | **Acid Test** | Armed hive world — hostiles *and* weather that eats you in the open. |
-| 5 | **Thin Air** | One third gravity. Their sniper rounds carry as far as yours. |
-| 6 | **The Last Stand** | Marksmen on every roof, closers on the ground, one life. |
+| **Proving Ground** | Open range | Daylight sandbox. Crates, houses, a skyline, range markers. Learn the arsenal here. |
+| **Long Meadow** | Wide valley | Artillery country — a mill on a far rise, a plank causeway over flooded pasture, a redoubt in the open. |
+| **Ironhold** | Vertical | A gatehouse, a curtain wall, a twelve-storey keep. One load-bearing decision brings the tower down. |
+| **The Quarry** | Bowl | An enclosed pit fought in the round. Haul road, crushing floor, a second and deeper cut, spoil tips. |
+| **The Drift** | Islands | A chain of platforms over a drop at one-third gravity. You jump higher, every round carries farther, and the ground is optional. |
+| **Grid City** | City street | Dense and tall, from the City Tiles pack. Intersection, low-rise strip, a construction site, an elevated road, one landmark tower. |
+| **Coldspine** | Winter fortress | Layered terraces up a ridge — outer wall, bell tower, citadel behind its gate. Stone shrugs off the light rounds. |
 
-### Endless
-
-A world dealt at random from **211 pre-authored set-pieces** (`src/levels/chunks.ts`) and
-streamed in front of you forever. Everything out here is armed. Three lives; the run ends
-when they're gone, and your furthest distance is kept.
-
-Chunks are dealt from a shuffled deck rather than sampled independently, so you get
-variety instead of the same tower three times running, and the deck is reshuffled when it
-empties. Difficulty is banded: the first ~260 m only deals tier-0 chunks, and the
-fortified sniper nests and skylines unlock the further you get. Everything the player has
-comfortably left behind is unloaded, so a 5 km run costs the same as a 50 m one.
+Every arena has hostile stickmen in it. An enemy is unarmed unless the arena hands it a
+`CombatSpec`, and the armed ones take cover, react to their building coming apart, and
+coordinate loosely — see *Enemy AI* below. Dying costs you nothing but the walk back;
+respawn is automatic.
 
 ## Controls
 
@@ -74,242 +58,231 @@ comfortably left behind is unloaded, so a 5 km run costs the same as a 50 m one.
 | `1` / `3`, `Q` / `E`, wheel | Step back / forward through the ammo list |
 | `S` | Crouch |
 | `R` | Go limp (toggle full ragdoll) |
-| `G` | God mode (invincible, infinite jetpack) — refused in campaign |
-| `F` | Restart the level |
-| `Esc` / `P` | Pause — Resume / Restart / Main Menu |
+| `G` | God mode (invincible, infinite jetpack) |
+| `F` | Restart the arena |
+| `Esc` / `P` | Pause — Resume / Restart / Options / Leave |
 | `M` | Mute the music |
 | `F3` | Debug overlay (fps, bodies, particles) |
 
-In the menu: `←` `→` choose, `Enter` open/play, `Esc` back, or click a card and then the
-big button.
+In the menu: `←` `→` choose, `Enter` play, `Esc` back, or click a card and then PLAY.
 
-There is no controls screen. `src/ui/coach.ts` teaches one control at a time, in-game,
-beside the stickman, led by a picture rather than prose, and dismissed by doing the
-thing — a player who never touches the jetpack never gets a jetpack lesson. It can be
-switched off entirely from the pause menu (`CONTROL TIPS`), and screenshake and music
-have their own four-step controls there too (`OFF`/`LOW`/`MEDIUM`/`FULL`) — the first
-because motion sickness is not a matter of taste, the second because somebody is playing
-this where they should not be.
+**There is no controls screen.** `src/ui/coach.ts` teaches one control at a time, in
+game, beside the stickman, led by a picture rather than prose, and dismissed by *doing
+the thing* — a player who never touches the jetpack never gets a jetpack lesson. It can
+be switched off from the pause menu (`CONTROL TIPS`). Screenshake and music each have a
+four-step control there too (`OFF`/`LOW`/`MEDIUM`/`FULL`) — screenshake because motion
+sickness is not a matter of taste, music because somebody is playing this where they
+should not be. Both persist.
 
-**Recoil is a movement tool.** The heavy rounds kick hard enough to launch you across the
-map. Firing an elephant while standing still will put you on your back.
+**Touch.** `src/ui/touch.ts` draws an on-screen pad — a move stick, an aim/fire thumb, a
+jump button and a pause corner. It is inert until a real touch arrives and auto-enables
+on coarse-pointer devices.
+
+**Recoil is a movement tool.** The heavy rounds kick hard enough to launch you across
+the map. Firing an elephant while standing still will put you on your back.
 
 **The jetpack** holds ~2.5 seconds of burn (infinite in god mode) and refills only once
-you are back on the ground, so it is a traversal and rescue tool rather than free flight. A full tank lifts
-you about 25 m — enough to reach most rooftops, and enough to save you after a shot throws
-you off a tower. Thrust is expressed as *net* acceleration on top of the world's gravity,
-so the pack handles identically on Earth and on Mars instead of being feeble on one and
+you are back on the ground, so it is a traversal and rescue tool rather than free
+flight. Thrust is expressed as *net* acceleration on top of the world's gravity, so the
+pack handles identically on Earth and on The Drift instead of being feeble on one and
 uncontrollable on the other. It cuts out while you are knocked down.
 
 ## The arsenal
 
-20 rounds, all defined as data in `src/weapons/ammo.ts`:
+21 rounds, all defined as data in `src/weapons/ammo.ts`, **all unlocked from a fresh
+save**:
 
 Chicken Cannon · Rocket Launcher · Sedan Slinger · Jetliner Blaster · Elephant Gun ·
-Human Resources (fires screaming ragdolls) · Anvil Express · Grand Finale (a piano, which
-plays a chord when it lands) · Cold Storage (flash-freezes whatever it touches) ·
-**Party Supplies** (ties balloons to whatever it hits — see *Buoyancy* below) ·
-Perfect Game (bowling ball) · Melon Repeater · Buzzsaw Barrage · Static Discharge ·
-Barrel Roll · Tactical Regret (a nuke) · Singularity (a black hole, 3 rounds) ·
-Hydro Cannon (a hose — puts out the fires below and douses anything flammable) ·
-Flamethrower (sets fires; wet targets won't catch) · Frag Grenade
+Human Resources (fires screaming ragdolls) · Anvil Express · Grand Finale (a piano,
+which plays a chord when it lands) · Cold Storage (flash-freezes whatever it touches) ·
+Party Supplies (ties balloons to whatever it hits — see *Buoyancy*) · Tow Cable (a
+barbed harpoon on a winch — see *The winch*) · Perfect Game (bowling ball) · Melon
+Repeater · Buzzsaw Barrage · Static Discharge · Barrel Roll · Tactical Regret (a nuke) ·
+Singularity (a black hole) · Hydro Cannon (a hose — puts out fires, douses anything
+flammable) · Flamethrower (sets fires; wet targets won't catch) · Frag Grenade
 
-Firing a round for the first time pays a one-off bounty, so trying the arsenal pays for
-itself — see *Progression* below.
+Weapons are **hand-authored pixel art**, generated once at boot into offscreen canvases
+from per-pixel source data in the repo (`render/pixel.ts` holds the buffer and the
+ramps; `render/gunart.ts` and `render/ammoart.ts` share them so guns and rounds cannot
+drift apart). Creature rounds stay bone-drawn ragdolls on purpose.
 
 ## Progression
 
-There isn't any, and that is deliberate. **Every round is unlocked from the first
-launch** — all twenty, on a brand-new save, priced at zero in `ARSENAL`
-(`src/ui/progress.ts`). A sandbox that withholds its toys is just a shorter sandbox, and
-the reason to go back into an arena you already flattened is the round you have not
-fired at it yet, which works just as well when that round was there all along.
+There isn't any, and that is deliberate. Every round is in your hands from the first
+launch — priced at zero in `src/ui/progress.ts`. A sandbox that withholds its toys is
+just a shorter sandbox, and the reason to go back into an arena you already flattened is
+the round you have not fired at it yet.
 
-Lifetime **carnage** is still earned by destroying things, still banked, and still shown
-on the menu and the HUD — it is a score now rather than a currency. Firing a round for
-the very first time pays a small first-strike bounty, once per round for as long as the
-save lives, because twenty rounds are only an arsenal if you actually try them.
+Lifetime **carnage** is earned by destroying things, banked in `localStorage`, and shown
+on the menu and the HUD — a score, not a currency. Firing a round for the very first
+time pays a one-off first-strike bounty, once per round, because 21 rounds are only an
+arsenal if you actually try them.
 
-The cost column in `ARSENAL` is kept rather than deleted, so re-pricing a round is a
-one-number edit: set a cost above zero and the menu's unlock bar, the unlock callout and
-the loadout gate all wake back up unchanged.
+The cost column in `progress.ts` is kept rather than deleted, so re-pricing a round is a
+one-number edit: set a cost above zero and the unlock bar and the loadout gate wake back
+up unchanged.
 
-Adding a new round is a single object literal — no new classes:
+Adding a new round is a single object literal in `ammo.ts` — no new classes. The bar for
+one is *does it claim a verb the engine can already do that nothing else owns* (Party
+Supplies claims buoyancy, the Tow Cable claims a directed pull); a re-skin of an
+existing behaviour does not qualify.
 
-```ts
-{
-  id: "safe", name: "Safe Deposit", tagline: "Contents: gravity.",
-  tint: "#4a515c",
-  count: 1, spread: 0.04, speed: 30, speedVar: 2, cooldown: 0.6,
-  recoil: 13, heft: 0.8, auto: true, reserve: -1, muzzle: 1.2,
-  spawn: makeRigid(rigid({
-    shape: "box", w: 1.1, h: 1.3, density: 800,
-    impactSound: "metal", draw: P.drawAnvil, points: 30,
-  })),
-}
-```
+## Audio
 
-`makeCreature` instead of `makeRigid` gives you a jointed, flailing, screaming version of
-the same thing.
+**Music, by the game's author.** Two liquid drum-and-bass tracks live in
+`src/Assets/music` as `Liquid DnB Synthxx 1.mp3` (the menu) and `Liquid DnB Synthxx
+2.mp3` (the arenas). Nothing names them in code — `src/fx/audio.ts` globs the folder,
+gives the first track to the menu and rotates the arenas through the rest, so adding a
+third is dropping an MP3 in the folder and nothing else. They crossfade over ~2 s on a
+mood change, each track holding its own playhead so bouncing between the menu and a
+fight sounds continuous.
 
-## Music
+Streamed through `<audio>` rather than decoded into WebAudio: a 3–4 MB MP3 decoded up
+front is several seconds of silence at boot and tens of megabytes resident on a phone.
 
-Two copyright-free drum-and-bass tracks by **Gwamm Music**, in `src/Assets/music`:
+**MUSIC** is a four-step control in the options panel (`OFF`/`LOW`/`MEDIUM`/`FULL`, with
+a real OFF) and `M` still mutes. Both persist.
 
-- *Beneath the Stars* — the menu
-- *Through the Clouds* — the arenas
-
-Nothing names them in code. `src/fx/audio.ts` globs the folder, gives the first track to
-the menu and rotates the arenas through the rest, so adding a third is dropping an MP3
-in the folder and nothing else. They crossfade over ~2s on a mood change, each track
-holding its own playhead so bouncing between the menu and a fight sounds continuous
-rather than restarting.
-
-Sound *effects* are still stubbed out: `audio.ts` keeps every effect call site as a
-no-op, which is why the file is a music player wearing an effects facade.
+Sound **effects** are stubbed: `audio.ts` keeps all ~70 effect call sites as no-op
+methods, so reinstating a mix later is a one-file change. The call sites are correct —
+they mark the exact moments the game believes are worth hearing.
 
 ## Layout
 
 ```
 src/
   core/        math, input, camera, physics wrapper, shared types
-  entities/    ragdoll, player, enemy, block/terrain/debris, projectile
+  entities/    ragdoll, player, enemy, block/terrain/debris, projectile, bullet, pickup
   weapons/     ammo registry, the gun
-  render/      draw helpers, stickman + creature renderers, prop art, backdrop, themes
-  fx/          juice (unified impact curve), particles, decals, gore, fire/fluid/solids,
-               music player (effects are stubbed — see `fx/audio.ts`)
-  levels/      structure builder, worlds, campaign, endless chunks, weather hazards
+  render/      draw helpers, stickman + creature renderers, pixel-art gun/ammo/balloon,
+               backdrop, themes, sprite sheets
+  fx/          juice (unified impact curve), particles, decals, gore, callouts,
+               fire / fluid / solids / buoyancy / tow, music player (effects stubbed)
+  levels/      structure builder, the seven arenas, seeded dressing, level types
   ai/          attract-mode driver
-  ui/          HUD, menus, progress store, in-game coach, player settings
+  ui/          HUD, menu, progress store, in-game coach, settings, quality, touch, chrome
+  platform/    the CrazyGames SDK integration (portal.ts), and the seam that keeps it optional
+  Assets/      the bundled art packs and the music
 ```
 
-A level is a `LevelDef` (`src/levels/types.ts`): a palette (`Theme`), a gravity value, a
-`build()` that lays out structures with `Builder`, and an optional hazard. Adding a fifth
-world means adding one file and one entry in `src/levels/index.ts` — no engine changes.
-
-The same type carries the run rules, which is why campaign missions need no special
-plumbing: `loadout` (which rounds you're issued, in HUD order), `allowGod`, `lives`,
-`briefing`, and `kind` (`"playground"` | `"campaign"` | `"endless"`). `Game` reads them
-when it loads the level; `Weapon.setLoadout` and `Game.godAllowed` do the rest.
+A level is a `LevelDef` (`src/levels/types.ts`): a palette (`Theme`), a gravity value,
+and a `build()` that lays out structures with `Builder`. Adding an eighth arena means
+adding one file and one entry in `src/levels/index.ts` — no engine changes.
 
 ## How it works
 
 **Physics: Rapier 2D** (Rust → WebAssembly). Chosen over Matter.js / Planck for joint
 stability and raw throughput — this game routinely has 900 bodies and 250+ joints live.
 `@dimforge/rapier2d-compat` inlines the WASM as base64, so the build is a single
-self-contained JS file with zero extra network requests.
+self-contained JS file with zero extra network requests. **Do not** migrate to
+`@dimforge/rapier2d` (separate `.wasm`) — the compat package exists precisely to avoid
+bundler `.wasm` misconfiguration, and it costs load-time size the game does not need.
 
 **Ragdolls** (`entities/ragdoll.ts`) are data-driven skeletons: a list of bones with
-positions, sizes and revolute joints with angle limits. Four skeletons ship — full biped
-(13 bodies, for the player and bosses), lite biped (7 bodies, for crowds and stickman
-ammo), quadruped (elephants) and chicken.
+positions, sizes and revolute joints with angle limits. Four skeletons ship — full
+biped (13 bodies, player and bosses), lite biped (7 bodies, crowds and stickman ammo),
+quadruped (elephants) and chicken.
 
 Three non-obvious things make the ragdolls behave, and all three are load-bearing:
 
-1. **Self-collision filtering.** Adjacent limbs overlap by design. Rapier does not filter
-   jointed bodies, so each ragdoll carries a `selfGroup` id and a physics hook drops
-   same-skeleton contact pairs. Without it the solver fights the joints and the body buzzes.
-
+1. **Self-collision filtering.** Adjacent limbs overlap by design. Rapier does not
+   filter jointed bodies, so each ragdoll carries a `selfGroup` id and a physics hook
+   drops same-skeleton contact pairs. Without it the solver fights the joints and the
+   body buzzes.
 2. **The root's rotation is pinned while a character is under control.** Springs and
-   torques cannot reliably stand a limp 70 kg skeleton up off the floor — the ground
-   contacts absorb the correction and the controller saturates face-down. Pinning the
-   pelvis angle makes "upright" true by construction and the joint limits carry it to the
-   rest of the body. Release it and the character is instantly, completely floppy. (Note:
-   `lockRotations` only clears the inverse inertia, so any leftover angular velocity keeps
-   integrating — it must be zeroed at the same time.)
+   torques cannot reliably stand a limp 70 kg skeleton up off the floor. Pinning the
+   pelvis angle makes "upright" true by construction and the joint limits carry it to
+   the rest of the body. Release it and the character is instantly, completely floppy.
+   (`lockRotations` only clears the inverse inertia, so any leftover angular velocity
+   keeps integrating — it must be zeroed at the same time.)
+3. **Controller forces scale with whole-body mass.** The pelvis is ~13 kg of a ~70 kg
+   body; a ride spring scaled by pelvis mass sags half a metre and collapses.
 
-3. **Controller forces scale with whole-body mass.** The pelvis is ~13 kg of a ~70 kg body;
-   a ride spring scaled by pelvis mass sags half a metre and collapses.
+**Input timing.** Edge-triggered input (key presses, clicks, wheel) is latched by the
+DOM handlers and consumed by the **fixed simulation step**, never by the render frame.
+Clearing edges per rendered frame throws presses away unread on any display faster than
+the 60 Hz sim, and during hitstop and slow-motion. If you touch `Game.frame` /
+`Game.simulate`, keep `input.consumeEdges()` inside the accumulator loop. Pause is the
+one exception — handled at frame rate, because while paused no simulation step exists to
+consume it.
 
-**Input timing.** Edge-triggered input (key presses, clicks, wheel) is latched by the DOM
-handlers and consumed by the **fixed simulation step**, never by the render frame. This is
-not a detail — clearing edges per rendered frame throws presses away unread on any display
-faster than the 60 Hz sim (half of them at 120 Hz, three quarters at 240 Hz) and during
-hitstop and slow-motion, when the sim deliberately runs slower than the display. If you
-touch `Game.frame` / `Game.simulate`, keep `input.consumeEdges()` inside the accumulator
-loop. Pause is the one exception: it is handled at frame rate, because while paused no
-simulation step exists to consume it.
+**Destruction** (`entities/block.ts`) is stacks of ordinary rigid bodies with
+per-material health. Blocks spawn *anchored* — static bodies — and convert to dynamic
+the moment anything disturbs them. This is what lets a 16-storey tower stand at all
+(loose stacks topple from solver noise within a second) and keeps ~800 idle bodies
+nearly free. Collapse still cascades naturally. Impact damage is computed from relative
+approach speed and reduced mass, in kilojoules; material constants live in one table.
 
-**Destruction** (`entities/block.ts`) is stacks of ordinary rigid bodies with per-material
-health. Blocks spawn *anchored* — static bodies — and convert to dynamic the moment
-anything disturbs them. This is what lets a 16-storey tower stand at all (loose stacks
-topple from solver noise within a second) and keeps ~800 idle bodies nearly free. Collapse
-still cascades naturally: a freed block falls, knocks its anchored neighbour loose, and the
-failure propagates.
+**"If you can shoot it, it is a rigid body wearing a square of the tileset"**
+(`Builder.spriteWall` / `spriteBlock`). `render/sprites.ts` reads a sheet's own alpha to
+decide which cells get a body, so a house's sloped roof comes out of the artwork rather
+than a hand-written table.
 
-Impact damage is computed from relative approach speed and reduced mass, in kilojoules.
-Material constants live in one table in `entities/block.ts`.
+**Enemy AI** (`entities/enemy.ts`). Armed enemies share one brain and differ only in
+what they do with their feet: `sentry` holds its spot, `patrol` paces a beat, `hunter`
+closes to a standoff distance and strafes. Acquisition is a real raycast
+(`Physics.lineOfSight`), so a wall is genuinely cover. Difficulty is carried by three
+numbers — `spread`, `interval`, `range` — so tuning is data, not behaviour. While it has
+line of sight an enemy paints a laser from its muzzle to you: the fairness valve.
 
-**Enemy AI** (`entities/enemy.ts`). An enemy is unarmed unless the level hands it a
-`CombatSpec`, which is why the playground worlds still behave exactly as they did.
-Armed ones share one brain and differ only in what they do with their feet:
+Their bullets (`entities/bullet.ts`) are **not** rigid bodies. At 80 m/s a real
+projectile tunnels or forces CCD on dozens of bodies, so a bullet marches a segment per
+step and raycasts along it — exact at any speed, one query per bullet per frame, drawn
+as a stretched tracer.
 
-- `sentry` holds the spot it was placed on — roof and battlement gunners.
-- `patrol` paces a fixed beat around its post.
-- `hunter` closes to a standoff distance and strafes.
+**Buoyancy** (`fx/buoyancy.ts`) is what Party Supplies leaves behind. A cluster of
+balloons is tied to a `PhysOwner` and the owner's net gravity scale becomes
+`1 - (balloons * LIFT_KG) / mass` — lift as *a mass one balloon can carry* rather than a
+force, which is both physically right (buoyancy is displaced-air weight, scaling with
+gravity as the object's weight does) and right for this game (a force tuned on Earth is a
+different weapon on The Drift). Ascent is clamped to 2.8 m/s, tuned against the camera:
+the frame sees ~10 m above the player and the whole joke is watching a thing go up and
+come back down. Time, fire and blast all pop balloons, and the player can cause all
+three. Balloons never hold Rapier handles across frames — an empty `PhysOwner.eachBody`
+visit is the signal to drop the cluster.
 
-Acquisition is a real raycast (`Physics.lineOfSight`), so a wall is genuinely cover, and a
-marksman stays out of the dormancy system as far as its own engagement range or a sniper
-nest would sleep through the fight it was placed to pick. Difficulty is carried almost
-entirely by three numbers — `spread`, `interval` and `range` — so tuning a mission means
-editing data, not behaviour. While it has line of sight an enemy paints a laser from its
-muzzle to you: that is the fairness valve, telling you exactly who is about to fire and
-from where.
-
-Their bullets (`entities/bullet.ts`) are **not** rigid bodies. At 80 m/s a real projectile
-either tunnels or forces CCD on dozens of bodies at once, and a bullet has no interesting
-physics of its own, so it marches a segment per step and raycasts along it — exact at any
-speed, one query per bullet per frame, and rendered as a stretched tracer because a round
-covering 1.3 m per frame is otherwise invisible. Incoming fire is charged at face value
-rather than through the player's self-damage discount (which exists so your own rocket
-blast doesn't kill you at the range this game is played at) — see `Game.target()`.
-
-**Buoyancy** (`fx/buoyancy.ts`) is what the Party Supplies round leaves behind. A
-cluster of balloons is tied to a `PhysOwner` and the whole owner's net gravity scale
-becomes `1 - (balloons * LIFT_KG) / mass`, so lift is expressed as *a mass one balloon
-can carry* rather than as a force. That is both physically right — real buoyancy is
-displaced-air weight, which scales with gravity exactly as the object's weight does — and
-right for this game, for the same reason `TUNE.jetNetAccel` exists: a force tuned on
-Earth is a different weapon on The Drift at -9.
-
-The curve is the design. Four balloons carry 880 kg, so a stickman is launched, a 1 m
-brick block rises, a concrete block hangs a hair the wrong side of floating, and metal
-barely notices — heavy structure needs a second round, and because balloons *accumulate*
-you can see how close a wall is to going up by counting them. Ascent is clamped to
-2.8 m/s, tuned against the camera rather than against taste: the frame sees about 10 m
-above the player and the whole joke is watching a thing go up and come back down, so an
-apex above the top of the screen throws the payoff away.
-
-Three things pop them and the player can cause all three: time (each balloon carries its
-own lifetime, biased late, so the bunch thins out and the target sinks), fire (`burning`
-is a plain field the flame sim writes, so a flamethrower brings a floating tower down),
-and blast (`popNear` is called by every explosion and every hard impact). Balloons never
-hold Rapier handles across frames — `PhysOwner.eachBody` yields nothing once an owner's
-bodies are gone, which is the signal to drop the cluster.
+**The winch** (`fx/tow.ts`) is the Tow Cable's whole idea: it pulls against real mass.
+`REEL_FORCE / mass` capped at `REEL_ACCEL_CAP` per body, and the *shortfall* decides how
+hard the line yanks you back. A stickman or a loose crate comes at you head-first; a car
+or a laden pillar is too heavy to reel, so the reaction wins and you are dragged into
+the building; a wall is pure reaction — a grappling zip, and the only way to cross a
+Drift chasm under your own power. It never holds a Rapier handle across frames either.
 
 **Game feel** (`fx/juice.ts`) is one curve, `Magnitude` (0..1), that every violent event
 is expressed on — hitstop, camera trauma/punch/kick, screen flash, slow-motion and
-particle burst all come off the same table instead of each call site inventing its own
-numbers. `fromEnergy`/`fromOverkill`/`fromExplosion`/`fromCollapse`/`fromFall` turn
-whatever a call site actually knows (collision kilojoules, damage-to-maxHp ratio, blast
-radius, fall speed) into a magnitude; `hit()`/`kill()`/`collapse()`/`explosion()` apply
-it. The audio director scores the same value, so sound and picture never drift apart.
-Screenshake itself is Perlin noise, not per-frame random, and trauma is squared before
-it becomes pixel amplitude — a documented motion-sickness trigger, so it is also a
-four-step player setting (`ui/settings.ts`) rather than a constant.
-
-**Audio** is synthesised at runtime — no audio files at all. Clucks, elephant
-trumpets, explosions and the piano chord are all oscillators and filtered noise
-(`fx/audio.ts`), mixed through a priority-weighted, distance-attenuated 24-voice pool
-with a master limiter (`fx/audio-mix.ts`) so a collapsing tower firing hundreds of
-impact events in one frame degrades gracefully instead of clipping. A generative
-soundtrack (`fx/audio-music.ts`) layers in with combat and eases back at the menu and
-the results screen, all driven by the same excitement value destruction feeds.
+particle burst all come off the same table.
+`fromEnergy`/`fromOverkill`/`fromExplosion`/`fromCollapse`/`fromFall` turn what a call
+site knows into a magnitude; `hit()`/`kill()`/`collapse()`/`explosion()` apply it.
+Screenshake is Perlin noise, and trauma is squared before it becomes pixel amplitude — a
+documented motion-sickness trigger, so it is also a four-step player setting.
 
 **Performance.** Two things dominate and both are handled: characters far from the camera
 leave the simulation entirely (`Ragdoll.setEnabled`), and off-screen actors are culled
-before drawing. Measured on the sandbox level: ~1 ms simulation and ~5 ms render at rest,
-~14 ms total mid-rampage with 340 awake bodies.
+before drawing. A **Quality setting** (Low / Medium / High, auto-detected floor) cuts the
+effects budget without cutting the game — decals off at Low, fewer background layers,
+particle caps lowered. The device floor is a 4 GB-RAM Chromebook holding frame.
+
+## CrazyGames
+
+`src/platform/portal.ts` is the SDK integration, written so nothing in it is
+load-bearing: every entry point resolves to a harmless default when the SDK is absent,
+slow, or throws, so the same build runs on CrazyGames, on a plain web host, on a dev
+server and from `file://`.
+
+- **Loading brackets** (`loadingStart` / `loadingStop`) wrap the initial load, so the
+  portal knows when it may run its own pre-roll.
+- **Gameplay brackets** (`gameplayStart` / `gameplayStop`) bound *actual play* — they
+  open on entering an arena and close on pause, ad, and return to menu.
+- **`happytime`** fires when a round is unlocked.
+- **A midgame interstitial** plays on every third restart, and nowhere else — never on
+  death. There is no rewarded ad: an arena has no fail state, so there is nothing to
+  revive and nothing to reward.
+
+The SDK `<script>` in `index.html` is loaded from CrazyGames' CDN, ahead of the game
+module and deliberately not awaited — a blocked or 404ing script costs a short delay on
+the portal and nothing anywhere else.
+
+See `CRAZYGAMES.md` for the submission checklist and asset list.
 
 ## Tuning
 
@@ -322,34 +295,12 @@ Almost all feel lives in three places:
 `F3` shows fps, body count and particle count. `window.game` is exposed for console
 poking.
 
-## Known gaps / next steps
+## Asset licensing
 
-- ~~**Bundle size**~~ — **closed, not a problem.** Measured at 2.3 MB raw / **~896 KB
-  gzipped**, against CrazyGames' 20 MB mobile-homepage eligibility gate. We are at roughly
-  4.5% of the limit, and cold boot measures well under a second against a 10 s budget. Do
-  **not** migrate to `@dimforge/rapier2d` (separate `.wasm`) to save size we do not need —
-  the compat package exists precisely to avoid bundler `.wasm` misconfiguration, and
-  switching trades a non-existent problem for a real load-time risk.
-- ~~**No mobile/touch controls / no CrazyGames SDK**~~ — **closed.** Both shipped:
-  `src/ui/touch.ts` and `src/platform/portal.ts` (ads, leaderboards, loading and gameplay
-  brackets, rewarded revive).
-- ~~**First-90-seconds / onboarding problem**~~ — **closed.** See `OVERHAUL.md` for the
-  full retention pass: populated cold opens in every world, a single-click PLAY, a
-  teach-by-doing coach instead of a controls screen, a unified impact curve
-  (`fx/juice.ts`) driving camera/hitstop/particles/audio off one number, a retuned
-  economy with medals and streaks, and a generative soundtrack that reacts to combat.
-- `fx/juice.ts`'s curve now drives every physics-contact impact and every kill
-  (`Game.dispatchImpacts` / `Game.reportDestruction`), but explosions and structure
-  collapses still use their own hand-authored camera/particle code in
-  `entities/projectile.ts` rather than `juice.explosion()` / `juice.collapse()`. Not a
-  bug — those are tuned and working — but it means `Camera.frameSpectacle` ("look at
-  that") is still unused. Worth revisiting if a big collapse ever needs to hold the
-  frame.
-- No leaderboard board exists yet for longest chain / biggest hit (only `daily` and
-  `distance` are submitted). `progress.recordChain` now tracks the lifetime best
-  locally; submitting it needs a board actually configured on the CrazyGames dashboard
-  first.
-- Endless has one palette (day) and one ground height. Chunks that change elevation or
-  theme mid-run would help it read as a journey rather than a corridor.
-- Campaign objectives are all "clear the map". Escort, timed and defend variants would fit
-  the existing `Game.checkOutcome` with little work.
+- **Music** — original work by the game's author. All rights reserved to the author;
+  free to use within this game.
+- **Art** — the *GandalfHardcore* FREE Platformer Assets and City Tiles packs (see the
+  `READ ME.txt` in each folder under `src/Assets`). The pack licence permits use in
+  commercial and non-commercial games and modification as needed; it prohibits
+  reselling, repackaging or redistributing the assets on their own, and AI-training use.
+  Only the sprites the game actually references are kept in the tree.

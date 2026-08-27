@@ -229,7 +229,7 @@ export class Menu {
    */
   private drawTitle(ctx: Ctx, w: number, bandH: number, k: number) {
     const a = "STICKMAN ";
-    const b = "ASCENSION";
+    const b = "TOTAL DESTRUCTION";
     const accent = this.previewLevel.accent;
     const y = bandH * 0.4;
 

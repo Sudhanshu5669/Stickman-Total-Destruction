@@ -158,32 +158,31 @@ class Portal {
   // ------------------------------------------------------------------ ads
 
   /**
-   * An interstitial. Deliberately *not* shown on death: an ad between dying and
-   * retrying is the single most reliable way to end a session, because it interrupts
-   * the exact moment the player wanted to press the button again. Restart is the
-   * right seam — the decision to keep playing has already been made.
+   * An interstitial, shown on restart and nowhere else.
+   *
+   * Deliberately *not* shown on death: an ad between dying and retrying is the single
+   * most reliable way to end a session, because it interrupts the exact moment the
+   * player wanted to press the button again. Restart is the right seam — the decision
+   * to keep playing has already been made — and `Game.adBreak` only reaches here on
+   * every third one.
+   *
+   * There is no rewarded/revive ad because the game has nothing to reward with: an
+   * arena has no fail state, dying costs only the walk back, and respawn is automatic.
+   * A leaderboard would need a board configured on the portal dashboard and a
+   * score-submission moment the sandbox does not have.
    */
   async midgame(): Promise<AdResult> {
-    return this.requestAd("midgame");
-  }
-
-  /** The revive ad. Only ever offered, never forced. */
-  async rewarded(): Promise<AdResult> {
-    return this.requestAd("rewarded");
-  }
-
-  private async requestAd(type: "midgame" | "rewarded"): Promise<AdResult> {
     if (!this.available) return "unavailable";
     this.adPlaying = true;
     try {
-      const result = await withTimeout(
+      return await withTimeout(
         new Promise<AdResult>((resolve) => {
           const callbacks = {
             adFinished: () => resolve("watched"),
             adError: () => resolve("unavailable"),
             adStarted: () => {},
           };
-          const r = call<Promise<unknown>>("ad.requestAd", type, callbacks);
+          const r = call<Promise<unknown>>("ad.requestAd", "midgame", callbacks);
           // Some versions return a promise instead of using the callbacks.
           if (isThenable(r)) {
             r.then(() => resolve("watched")).catch(() => resolve("unavailable"));
@@ -194,40 +193,11 @@ class Portal {
         AD_TIMEOUT,
         "unavailable",
       );
-      return result;
     } catch {
       return "unavailable";
     } finally {
       this.adPlaying = false;
     }
-  }
-
-  // ------------------------------------------------------------------ scores
-
-  /**
-   * Posts a score. Fire-and-forget by design: a leaderboard that is down must not
-   * delay the results card by even a frame.
-   */
-  submitScore(boardId: string, score: number) {
-    if (!this.available || !(score > 0)) return;
-    call("game.showInviteButton");
-    const r = call<Promise<unknown>>("leaderboard.submitScore", boardId, { score: Math.floor(score) });
-    if (isThenable(r)) r.catch((e) => console.warn("[portal] score submit failed", e));
-  }
-
-  /**
-   * The player's standing on a board, or null when unavailable. Rendered only if it
-   * arrives — the results card never waits on it.
-   */
-  async rank(boardId: string): Promise<{ rank: number; score: number } | null> {
-    if (!this.available) return null;
-    const r = call<Promise<Unknown>>("leaderboard.getPlayerEntry", boardId);
-    if (!isThenable(r)) return null;
-    const entry = await withTimeout<Unknown | null>(r.catch(() => null), 4000, null);
-    if (!entry) return null;
-    const rank = Number(entry.rank);
-    const score = Number(entry.score);
-    return Number.isFinite(rank) && Number.isFinite(score) ? { rank, score } : null;
   }
 }
 
